@@ -1,9 +1,9 @@
 name: Run dealer monitor
 
 on:
-  workflow_dispatch:        # ручной запуск
+  workflow_dispatch:
   schedule:
-    - cron: '0 7,19 * * *'  # 2 раза в день (07:00 и 19:00 UTC ≈ МСК+3)
+    - cron: '0 7,19 * * *'
 
 jobs:
   run-script:
@@ -22,8 +22,7 @@ jobs:
         run: |
           pip install requests beautifulsoup4 pandas openpyxl
 
-      # 🔍 Отладка (можно потом удалить)
-           - name: Debug env
+      - name: Debug env
         env:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
