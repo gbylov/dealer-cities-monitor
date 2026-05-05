@@ -46,7 +46,7 @@ BRANDS = [
     {'name': 'CHANGAN UNI', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'uni'},
     {'name': 'AVATR', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'avatr'},
     {'name': 'DEEPAL', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'deepal'},
-    {'name': 'GAC', 'url': 'https://gac.ru/become-a-dealer?footer', 'method': 'ul_li'},
+    {'name': 'GAC', 'url': 'https://gac.ru/become-a-dealer?footer', 'method': 'gac_li'},
     {'name': 'JAC', 'url': 'https://jac.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'EVOLUTE', 'url': 'https://evolute.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'TENET', 'url': 'https://tenet.ru/dealers/become-a-dealer/', 'method': 'ul_li'},
@@ -258,6 +258,36 @@ def get_omoda_dealer_cities(soup):
     return []
 
 
+def get_gac_dealer_cities(soup):
+    """
+    gac.ru/become-a-dealer — города спрятаны в аккордеоне td-accordion.
+    Кнопка аккордеона: <button>Список городов...</button>
+    Тело аккордеона: <div class="td-accordion__body"> с тремя колонками ul/li.
+    """
+    keyword = 'список городов'
+    # Ищем кнопку аккордеона с нужным текстом
+    for tag in soup.find_all(['button', 'h2', 'h3', 'h4', 'p', 'strong']):
+        if keyword in tag.get_text(' ', strip=True).lower():
+            cities = []
+            seen = set()
+            # Для аккордеона — тело идёт как следующий sibling div
+            parent = tag.parent  # div.td-accordion
+            body = parent.find('div', class_='td-accordion__body') if parent else None
+            if not body:
+                # Fallback: ищем все ul после тега
+                body = tag.find_next('div')
+            if body:
+                for ul in body.find_all('ul'):
+                    for li in ul.find_all('li'):
+                        city = clean_city(li.get_text())
+                        if is_valid_city(city) and city not in seen:
+                            seen.add(city)
+                            cities.append(city)
+            if cities:
+                return cities
+    return []
+
+
 def get_gaz_cities(url):
     fallback = [
         'Астрахань', 'Душанбе', 'Курган', 'Миасс',
@@ -358,23 +388,31 @@ def get_changan_cities(html, brand=None):
     }
     subbrand = (brand or {}).get('subbrand')
 
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto('https://changanauto.ru/about-us/become-a-dealer',
-                      wait_until='networkidle', timeout=30000)
-            # Ждём появления хотя бы одной таблицы с городами
-            page.wait_for_selector('table', timeout=15000)
-            rendered_html = page.content()
-            browser.close()
-        return get_changan_cities_from_table(rendered_html, subbrand)
-    except ImportError:
-        print('  CHANGAN: Playwright не установлен, используем fallback')
-    except Exception as e:
-        print(f'  CHANGAN: Playwright ошибка: {e}, используем fallback')
-
+    # Кеш Playwright-рендеренного HTML чтобы не грузить страницу 4 раза
+    _CHANGAN_RENDERED = getattr(get_changan_cities, '_rendered_html', None)
+    if _CHANGAN_RENDERED is None:
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                page.goto('https://changanauto.ru/about-us/become-a-dealer',
+                          wait_until='networkidle', timeout=30000)
+                page.wait_for_selector('table', timeout=15000)
+                _CHANGAN_RENDERED = page.content()
+                browser.close()
+            get_changan_cities._rendered_html = _CHANGAN_RENDERED
+        except ImportError:
+            print('  CHANGAN: Playwright не установлен, используем fallback')
+            return FALLBACK.get(subbrand, [])
+        except Exception as e:
+            print(f'  CHANGAN: Playwright ошибка: {e}, используем fallback')
+            get_changan_cities._rendered_html = ''
+            return FALLBACK.get(subbrand, [])
+    if _CHANGAN_RENDERED:
+        result = get_changan_cities_from_table(_CHANGAN_RENDERED, subbrand)
+        if result:
+            return result
     return FALLBACK.get(subbrand, [])
 
 
@@ -432,7 +470,9 @@ def get_cities(brand, html_cache=None):
 
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    if method == 'omoda_li':
+    if method == 'gac_li':
+        cities = get_gac_dealer_cities(soup)
+    elif method == 'omoda_li':
         cities = get_omoda_dealer_cities(soup)
     elif method == 'gaz_playwright':
         cities = get_gaz_cities(url)
