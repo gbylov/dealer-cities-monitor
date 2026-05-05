@@ -26,7 +26,7 @@ BRANDS = [
     {'name': 'ГАЗ', 'url': 'https://stt.ru/become-partners', 'method': 'gaz_playwright'},
     {'name': 'УАЗ', 'url': 'https://www.uaz.ru/company/become-dealer', 'method': 'p_colon'},
     {'name': 'LADA', 'url': 'https://www.lada.ru/dealers/contest', 'method': 'ul_li'},
-    {'name': 'МОСКВИЧ', 'url': 'https://moskvich.ru/become-a-dealer', 'method': 'ul_li'},
+    {'name': 'МОСКВИЧ', 'url': 'https://moskvich.ru/become-a-dealer', 'method': 'moskvich_li'},
     {
         'name': 'HAVAL',
         'url': 'https://haval.ru/become_dealer/actual-dealer/',
@@ -288,35 +288,32 @@ def get_gac_dealer_cities(soup):
     return []
 
 
+def get_moskvich_cities(soup):
+    """
+    moskvich.ru/become-a-dealer — города в ul/li внутри div.dealer_tender_block2
+    """
+    block = soup.find('div', class_='dealer_tender_block2')
+    if block:
+        cities = []
+        seen = set()
+        for li in block.find_all('li'):
+            city = clean_city(li.get_text())
+            if is_valid_city(city) and city not in seen:
+                seen.add(city)
+                cities.append(city)
+        if cities:
+            return cities
+    return []
+
+
 def get_gaz_cities(url):
     """
     stt.ru/become-partners — дистрибьютор ГАЗ.
-    На странице два блока partnership-cities-list:
-      1-й — Сервис (61 город)
-      2-й — Дилерский центр (7 городов) — нам нужен он
-    Оба блока рендерятся статически, Playwright не нужен.
+    Вкладки Сервис/Дилерский центр разделяются JS.
+    С сервера приходит только один список (Сервис, 61 город).
+    Используем жёстко прописанный список Дилерский центр (7 городов).
+    Обновлять вручную при изменениях на сайте.
     """
-    try:
-        r = fetch(url)
-        if r.status_code != 200:
-            raise Exception(f'HTTP {r.status_code}')
-        soup = BeautifulSoup(r.text, 'html.parser')
-        lists = soup.find_all('div', class_='partnership-cities-list')
-        # Берём второй блок (Дилерский центр), если есть
-        target = lists[1] if len(lists) >= 2 else (lists[0] if lists else None)
-        if target:
-            cities = []
-            seen = set()
-            for div in target.find_all('div', class_='partnership-cities-list__item-link'):
-                city = clean_city(div.get_text())
-                if is_valid_city(city) and city not in seen:
-                    seen.add(city)
-                    cities.append(city)
-            if cities:
-                return cities
-    except Exception as e:
-        print(f'  ГАЗ ошибка: {e}')
-    # Fallback — последний известный список Дилерский центр
     return ['Астрахань', 'Душанбе', 'Курган', 'Миасс',
             'Новый Уренгой', 'Нижневартовск', 'Сочи']
 
@@ -458,7 +455,9 @@ def get_cities(brand, html_cache=None):
 
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    if method == 'gac_li':
+    if method == 'moskvich_li':
+        cities = get_moskvich_cities(soup)
+    elif method == 'gac_li':
         cities = get_gac_dealer_cities(soup)
     elif method == 'omoda_li':
         cities = get_omoda_dealer_cities(soup)
