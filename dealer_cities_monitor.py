@@ -454,7 +454,7 @@ def get_changan_cities(html, brand=None):
     Возвращаем объединённый список уникальных городов по всем суббрендам.
     """
     import json as _json
-    soup = BeautifulSoup(html, 'lxml')
+    soup = BeautifulSoup(html, 'html.parser')
     div = soup.find('div', id='app')
     if not div:
         return []
