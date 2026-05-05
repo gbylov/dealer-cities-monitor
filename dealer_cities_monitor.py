@@ -289,49 +289,37 @@ def get_gac_dealer_cities(soup):
 
 
 def get_gaz_cities(url):
-    fallback = [
-        'Астрахань', 'Душанбе', 'Курган', 'Миасс',
-        'Новый Уренгой', 'Нижневартовск', 'Сочи',
-    ]
-
+    """
+    stt.ru/become-partners — дистрибьютор ГАЗ.
+    На странице два блока partnership-cities-list:
+      1-й — Сервис (61 город)
+      2-й — Дилерский центр (7 городов) — нам нужен он
+    Оба блока рендерятся статически, Playwright не нужен.
+    """
     try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, wait_until='networkidle', timeout=30000)
-            page.click('text=Дилерский центр')
-            page.wait_for_timeout(1500)
-            html = page.content()
-            browser.close()
-
-        soup = BeautifulSoup(html, 'html.parser')
-        cities = []
-        seen = set()
-
-        for tag in soup.find_all(['p', 'li', 'span', 'div', 'strong', 'b']):
-            text = clean_city(tag.get_text(' ', strip=True))
-
-            if (
-                is_valid_city(text)
-                and text not in seen
-                and not any(w in text.lower() for w in [
-                    'сервис', 'дилерский', 'центр', 'поиск', 'городам',
-                    'всего', 'город', 'запчаст', 'спецтехник', 'партнёр',
-                    'партнер', 'заявк', 'консульт', 'интервью', 'документ',
-                    'сотрудничест', 'рентабельност', 'ассортимент',
-                    'персонал', 'совместн', 'программ',
-                ])
-            ):
-                seen.add(text)
-                cities.append(text)
-
-        return cities if 3 <= len(cities) <= 20 else fallback
-
+        r = fetch(url)
+        if r.status_code != 200:
+            raise Exception(f'HTTP {r.status_code}')
+        soup = BeautifulSoup(r.text, 'html.parser')
+        lists = soup.find_all('div', class_='partnership-cities-list')
+        # Берём второй блок (Дилерский центр), если есть
+        target = lists[1] if len(lists) >= 2 else (lists[0] if lists else None)
+        if target:
+            cities = []
+            seen = set()
+            for div in target.find_all('div', class_='partnership-cities-list__item-link'):
+                city = clean_city(div.get_text())
+                if is_valid_city(city) and city not in seen:
+                    seen.add(city)
+                    cities.append(city)
+            if cities:
+                return cities
     except Exception as e:
-        print(f'  ГАЗ Playwright ошибка: {e}, используем fallback')
-        return fallback
+        print(f'  ГАЗ ошибка: {e}')
+    # Fallback — последний известный список Дилерский центр
+    return ['Астрахань', 'Душанбе', 'Курган', 'Миасс',
+            'Новый Уренгой', 'Нижневартовск', 'Сочи']
+
 
 
 def get_changan_cities_from_table(html, subbrand=None):
