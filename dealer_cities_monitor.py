@@ -2,20 +2,12 @@ import os
 import json
 import re
 import time
-import smtplib
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import Header
 
-EMAIL_FROM = os.environ.get('EMAIL_FROM')
-EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-EMAIL_TO = 'g.bylov@tmgauto.ru'
-
-SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.mail.ru')
-SMTP_PORT = int(os.environ.get('SMTP_PORT') or 465)
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 CITIES_FILE = 'dealer_cities.json'
 MSK = timezone(timedelta(hours=3))
@@ -84,10 +76,7 @@ CITY_STOP_PHRASES = [
     'стратегии', 'размер', 'площадь', 'расположение',
 ]
 
-CITY_GARBAGE = {
-    'России', 'в', 'и', 'г', 'ul', 'li', 'h2', '/h2',
-    '<ul>', '</ul>', '<li>', '</li>'
-}
+CITY_GARBAGE = {'России', 'в', 'и', 'г', 'ul', 'li', 'h2', '/h2', '<ul>', '</ul>', '<li>', '</li>'}
 
 
 def fetch(url, retries=2, delay=3, timeout=15):
@@ -108,8 +97,7 @@ def clean_city(text):
     text = re.sub(r'<[^>]+>', '', text)
     text = text.replace('\xa0', ' ').replace('&nbsp;', ' ')
     text = text.strip(' .:()«»"\'\n\r\t')
-    text = ' '.join(text.split())
-    return text
+    return ' '.join(text.split())
 
 
 def is_valid_city(text):
@@ -120,13 +108,9 @@ def is_valid_city(text):
         return False
     if not any(c.isalpha() for c in text):
         return False
-    if text in CITY_GARBAGE:
+    if text in CITY_GARBAGE or lower in CITY_GARBAGE:
         return False
-    if lower in CITY_GARBAGE:
-        return False
-    if 'http' in lower:
-        return False
-    if '<' in text or '>' in text:
+    if 'http' in lower or '<' in text or '>' in text:
         return False
     if text[0].isdigit():
         return False
@@ -136,33 +120,28 @@ def is_valid_city(text):
         'партнёр', 'скачать', 'отправить', 'требования',
         'заполнить', 'подать', 'контакт', 'телефон',
     ]
-    if any(w in lower for w in bad_words):
-        return False
-
-    return True
+    return not any(w in lower for w in bad_words)
 
 
 def find_city_block(soup):
     text_lower = soup.get_text(' ', strip=True).lower()
-    found_kw = None
-
-    for kw in CITY_BLOCK_KEYWORDS:
-        if kw in text_lower:
-            found_kw = kw
-            break
+    found_kw = next((kw for kw in CITY_BLOCK_KEYWORDS if kw in text_lower), None)
 
     if not found_kw:
         return []
 
     for tag in soup.find_all(['p', 'div', 'li', 'span', 'h2', 'h3', 'h4']):
         tag_text = tag.get_text(' ', strip=True).lower()
+
         if found_kw in tag_text:
             combined = tag.get_text(' ', strip=True)
             nxt = tag.find_next_sibling()
+
             if nxt:
                 combined += ' ' + nxt.get_text(' ', strip=True)
 
             cities = extract_cities_from_text(combined)
+
             if cities:
                 return cities
 
@@ -211,12 +190,14 @@ def parse_ul_li(soup):
     for tag in soup.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'strong']):
         if any(kw in tag.get_text(' ', strip=True).lower() for kw in CITY_BLOCK_KEYWORDS):
             ul = tag.find_next('ul')
+
             if ul:
                 cities = []
                 seen = set()
 
                 for li in ul.find_all('li'):
                     city = clean_city(li.get_text(' ', strip=True))
+
                     if is_valid_city(city) and city not in seen:
                         seen.add(city)
                         cities.append(city)
@@ -224,11 +205,7 @@ def parse_ul_li(soup):
                 if cities:
                     return cities
 
-    cities = find_city_block(soup)
-    if cities:
-        return cities
-
-    return []
+    return find_city_block(soup)
 
 
 def parse_p_colon(soup):
@@ -237,12 +214,11 @@ def parse_p_colon(soup):
 
 def parse_regex(text, pattern):
     m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+
     if not m:
         return []
 
-    raw = m.group(1)
-    raw = re.sub(r'<[^>]+>', ' ', raw)
-
+    raw = re.sub(r'<[^>]+>', ' ', m.group(1))
     cities = re.split(r'[,;\n•·–—]+', raw)
 
     result = []
@@ -250,6 +226,7 @@ def parse_regex(text, pattern):
 
     for c in cities:
         c = clean_city(c)
+
         if is_valid_city(c) and c not in seen:
             seen.add(c)
             result.append(c)
@@ -263,12 +240,14 @@ def get_omoda_dealer_cities(soup):
     for tag in soup.find_all(['p', 'h2', 'h3', 'div', 'span']):
         if keyword in tag.get_text(' ', strip=True).lower():
             ul = tag.find_next('ul')
+
             if ul:
                 cities = []
                 seen = set()
 
                 for li in ul.find_all('li'):
                     city = clean_city(li.get_text(' ', strip=True))
+
                     if is_valid_city(city) and city not in seen:
                         seen.add(city)
                         cities.append(city)
@@ -281,13 +260,8 @@ def get_omoda_dealer_cities(soup):
 
 def get_gaz_cities(url):
     fallback = [
-        'Астрахань',
-        'Душанбе',
-        'Курган',
-        'Миасс',
-        'Новый Уренгой',
-        'Нижневартовск',
-        'Сочи',
+        'Астрахань', 'Душанбе', 'Курган', 'Миасс',
+        'Новый Уренгой', 'Нижневартовск', 'Сочи',
     ]
 
     try:
@@ -303,7 +277,6 @@ def get_gaz_cities(url):
             browser.close()
 
         soup = BeautifulSoup(html, 'html.parser')
-
         cities = []
         seen = set()
 
@@ -324,10 +297,7 @@ def get_gaz_cities(url):
                 seen.add(text)
                 cities.append(text)
 
-        if 3 <= len(cities) <= 20:
-            return cities
-
-        return fallback
+        return cities if 3 <= len(cities) <= 20 else fallback
 
     except Exception as e:
         print(f'  ГАЗ Playwright ошибка: {e}, используем fallback')
@@ -389,8 +359,7 @@ def get_volga_cities_tilda(html):
 
             for line in decoded.split('\n'):
                 if '//' in line:
-                    city = line.split('//')[0].strip()
-                    city = clean_city(city)
+                    city = clean_city(line.split('//')[0].strip())
 
                     if is_valid_city(city) and city not in seen:
                         seen.add(city)
@@ -449,11 +418,7 @@ def get_cities(brand, html_cache=None):
     if not cities:
         cities = find_city_block(soup)
 
-    print(
-        f'  [{name}] найдено городов: {len(cities)} — '
-        f'{cities[:5]}{"..." if len(cities) > 5 else ""}'
-    )
-
+    print(f'  [{name}] найдено городов: {len(cities)} — {cities[:5]}{"..." if len(cities) > 5 else ""}')
     return cities
 
 
@@ -470,117 +435,71 @@ def save_cities(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def send_email(subject, body_html):
-    if not EMAIL_FROM or not EMAIL_PASSWORD:
-        print('Email не отправлен: EMAIL_FROM или EMAIL_PASSWORD не заданы')
-        return False
+def build_telegram_text(results, changes, today_str):
+    lines = []
+    lines.append(f'📊 Города для дилерства — {today_str}')
+    lines.append('')
 
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = str(Header(subject, 'utf-8'))
-    msg['From'] = EMAIL_FROM
-    msg['To'] = EMAIL_TO
-    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-
-    try:
-        if SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
-                server.login(EMAIL_FROM, EMAIL_PASSWORD)
-                server.sendmail(EMAIL_FROM, [EMAIL_TO], msg.as_string())
-        else:
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
-                server.starttls()
-                server.login(EMAIL_FROM, EMAIL_PASSWORD)
-                server.sendmail(EMAIL_FROM, [EMAIL_TO], msg.as_string())
-
-        print('Письмо отправлено успешно')
-        return True
-
-    except Exception as e:
-        print(f'Email не отправлен, но скрипт продолжает работу: {e}')
-        return False
-
-
-def build_email_html(results, changes, today_str):
-    changes_html = ''
     has_changes = any(v for v in changes.values())
 
     if has_changes:
-        change_rows = ''
-
+        lines.append('🔔 Изменения:')
         for brand_name, brand_changes in changes.items():
             for change in brand_changes:
-                clean = re.sub(r'<[^>]+>', '', change)
-                color = '#c00' if '❌' in change else '#007700'
+                lines.append(f'{brand_name}: {change}')
+        lines.append('')
+    else:
+        lines.append('🔕 Изменений с прошлого запуска не найдено.')
+        lines.append('')
 
-                change_rows += (
-                    f'<tr>'
-                    f'<td style="padding:6px 16px;border-bottom:1px solid #eee;'
-                    f'font-weight:bold;color:#c00">{brand_name}</td>'
-                    f'<td style="padding:6px 16px;border-bottom:1px solid #eee;'
-                    f'color:{color}">{clean}</td>'
-                    f'</tr>'
-                )
-
-        changes_html = f'''
-        <h3 style="background:#c00;color:white;padding:10px 16px;margin:0">
-            🔔 Изменения за неделю
-        </h3>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-            {change_rows}
-        </table>
-        '''
-
-    rows = ''
+    lines.append('📍 Текущая картина:')
 
     for brand_name, cities in results.items():
         if cities:
-            cities_str = ', '.join(cities)
+            preview = ', '.join(cities[:12])
+            suffix = f' … ещё {len(cities) - 12}' if len(cities) > 12 else ''
+            lines.append(f'• {brand_name}: {preview}{suffix}')
         else:
-            cities_str = (
-                '<span style="color:#999;font-style:italic">'
-                'не найдено / нет открытых позиций'
-                '</span>'
+            lines.append(f'• {brand_name}: нет данных / не найдено')
+
+    return '\n'.join(lines)
+
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print('Telegram не отправлен: TELEGRAM_TOKEN или TELEGRAM_CHAT_ID не заданы')
+        return False
+
+    url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
+    parts = [message[i:i + 3500] for i in range(0, len(message), 3500)]
+
+    ok = True
+
+    for idx, part in enumerate(parts, start=1):
+        try:
+            response = requests.post(
+                url,
+                json={
+                    'chat_id': TELEGRAM_CHAT_ID,
+                    'text': part,
+                    'disable_web_page_preview': True,
+                },
+                timeout=20,
             )
 
-        rows += (
-            f'<tr>'
-            f'<td style="padding:8px 16px;border-bottom:1px solid #eee;'
-            f'font-weight:bold;color:#c00;vertical-align:top;white-space:nowrap">'
-            f'{brand_name}</td>'
-            f'<td style="padding:8px 16px;border-bottom:1px solid #eee">'
-            f'{cities_str}</td>'
-            f'</tr>'
-        )
+            if response.status_code != 200:
+                ok = False
+                print(f'Telegram ошибка HTTP {response.status_code}: {response.text}')
+            else:
+                print(f'Telegram сообщение {idx}/{len(parts)} отправлено')
 
-    html = f'''
-    <html>
-    <body style="font-family:Arial,sans-serif;color:#333;max-width:750px;margin:0 auto">
-        <h2 style="background:#222;color:white;padding:16px;margin:0">
-            Города, открытые для поиска дилеров
-        </h2>
+        except Exception as e:
+            ok = False
+            print(f'Telegram ошибка: {e}')
 
-        <p style="padding:10px 16px;background:#f9f9f9;margin:0;font-size:12px;color:#666">
-            Данные на {today_str} · Источник: официальные сайты производителей
-        </p>
+        time.sleep(1)
 
-        {changes_html}
-
-        <table style="width:100%;border-collapse:collapse">
-            <tr style="background:#f0f0f0">
-                <th style="padding:8px 16px;text-align:left;width:130px">Бренд</th>
-                <th style="padding:8px 16px;text-align:left">Открытые города</th>
-            </tr>
-            {rows}
-        </table>
-
-        <p style="padding:12px 16px;font-size:11px;color:#999">
-            Автоматический мониторинг · TMG Auto · Обновлено {today_str}
-        </p>
-    </body>
-    </html>
-    '''
-
-    return html
+    return ok
 
 
 if __name__ == '__main__':
@@ -617,8 +536,8 @@ if __name__ == '__main__':
     save_cities(new_data)
     print(f'\nДанные сохранены в {CITIES_FILE}')
 
-    print('Отправляем письмо...')
-    html = build_email_html(new_data, changes, today)
-    send_email(f'Города для дилерства — {today}', html)
+    print('Отправляем в Telegram...')
+    telegram_text = build_telegram_text(new_data, changes, today)
+    send_telegram(telegram_text)
 
     print('\n=== Готово ===')
