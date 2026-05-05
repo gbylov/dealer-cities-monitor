@@ -309,19 +309,50 @@ def get_changan_cities(html, brand=None):
     div = soup.find('div', id='app')
 
     if not div:
+        print('  CHANGAN: div#app не найден')
         return []
 
     raw_attr = div.get('data-page', '')
 
     if not raw_attr:
+        print('  CHANGAN: data-page пустой')
+        # Пробуем найти данные в script-теге (альтернативный рендеринг)
+        for script in soup.find_all('script'):
+            if script.string and 'tables' in script.string and 'changan' in script.string:
+                print(f'  CHANGAN: найден script с данными, длина {len(script.string)}')
+                try:
+                    m = re.search(r'\{.*"tables".*\}', script.string, re.DOTALL)
+                    if m:
+                        data = json.loads(m.group(0))
+                        print(f'  CHANGAN: данные из script извлечены')
+                        tables = data.get('tables', [])
+                        if tables:
+                            target = (brand or {}).get('subbrand')
+                            seen = set()
+                            cities = []
+                            for t in tables:
+                                if target and t.get('name', '') != target:
+                                    continue
+                                for row in t.get('rows', []):
+                                    city = clean_city(re.sub(r'\s*\(.*?\)', '', row.get('city', '').strip()))
+                                    if is_valid_city(city) and city not in seen:
+                                        seen.add(city)
+                                        cities.append(city)
+                            return cities
+                except Exception as e:
+                    print(f'  CHANGAN: ошибка парсинга script: {e}')
+        print(f'  CHANGAN: HTML размер {len(html)}, первые 200 символов body: {soup.body.get_text()[:200] if soup.body else "нет body"}')
         return []
 
+    print(f'  CHANGAN: data-page найден, длина {len(raw_attr)}')
     try:
         data = json.loads(raw_attr)
-    except Exception:
+    except Exception as e:
+        print(f'  CHANGAN: ошибка json.loads: {e}')
         return []
 
     tables = data.get('props', {}).get('data', {}).get('tables', [])
+    print(f'  CHANGAN: таблиц найдено: {len(tables)}')
     target = (brand or {}).get('subbrand')
 
     seen = set()
