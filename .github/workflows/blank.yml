@@ -22,14 +22,16 @@ jobs:
         run: |
           pip install requests beautifulsoup4 pandas openpyxl
 
-      # 🔍 Проверка Telegram Secrets
       - name: Debug Telegram
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "TELEGRAM_TOKEN exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
-          echo "TELEGRAM_CHAT_ID exists: ${{ secrets.TELEGRAM_CHAT_ID != '' }}"
+          echo "TOKEN exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
+          echo "CHAT_ID exists: ${{ secrets.TELEGRAM_CHAT_ID != '' }}"
+          echo "TOKEN starts with: ${TELEGRAM_TOKEN:0:5}"
+          echo "TOKEN length: ${#TELEGRAM_TOKEN}"
+          echo "CHAT_ID=$TELEGRAM_CHAT_ID"
 
       - name: Run script
         env:
