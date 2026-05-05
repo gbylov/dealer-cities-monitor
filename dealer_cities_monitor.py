@@ -528,7 +528,7 @@ def get_cities(brand, html_cache=None):
         if html_cache is not None:
             html_cache[url] = r
 
-    soup = BeautifulSoup(r.text, 'lxml')
+    soup = BeautifulSoup(r.text, 'html.parser')
 
     if method == 'omoda_li':
         cities = get_omoda_dealer_cities(soup)
