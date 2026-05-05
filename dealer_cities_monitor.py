@@ -338,44 +338,44 @@ def get_changan_cities_from_table(html, subbrand=None):
 
 def get_changan_cities(html, brand=None):
     """
-    changanauto.ru — Vue SSR.
-    Города рендерятся в HTML-таблицах (приоритет).
-    Fallback: JSON в data-page атрибуте div#app (старый формат).
+    changanauto.ru — Vue CSR (клиентский рендеринг).
+    Таблицы появляются только после выполнения JS.
+    Используем Playwright чтобы дождаться таблиц, потом парсим HTML.
     Порядок таблиц: changan=0, uni=1, avatr=2, deepal=3.
+    Fallback: жёстко прописанные города из последнего известного состояния.
     """
+    FALLBACK = {
+        'changan': ['Березники', 'Владивосток', 'Волгоград', 'Кемерово',
+                    'Майкоп', 'Нефтекамск', 'Обнинск', 'Псков', 'Хабаровск'],
+        'uni':     ['Березники', 'Владивосток', 'Волгоград', 'Кемерово',
+                    'Майкоп', 'Нефтекамск', 'Обнинск', 'Псков'],
+        'avatr':   ['Владимир', 'Грозный', 'Иркутск', 'Кемерово', 'Красноярск',
+                    'Минеральные Воды', 'Новороссийск', 'Омск', 'Ростов-на-Дону',
+                    'Рязань', 'Самара', 'Саратов', 'Сочи', 'Тула', 'Ярославль'],
+        'deepal':  ['Абакан', 'Белгород', 'Владимир', 'Иркутск', 'Калуга',
+                    'Красноярск', 'Курск', 'Липецк', 'Мурманск', 'Орёл',
+                    'Петрозаводск', 'Самара', 'Саратов', 'Сургут', 'Ярославль'],
+    }
     subbrand = (brand or {}).get('subbrand')
 
-    # ── Приоритет 1: HTML-таблицы (новый формат Vue SSR) ─────────────────────
-    cities = get_changan_cities_from_table(html, subbrand)
-    if cities:
-        return cities
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto('https://changanauto.ru/about-us/become-a-dealer',
+                      wait_until='networkidle', timeout=30000)
+            # Ждём появления хотя бы одной таблицы с городами
+            page.wait_for_selector('table', timeout=15000)
+            rendered_html = page.content()
+            browser.close()
+        return get_changan_cities_from_table(rendered_html, subbrand)
+    except ImportError:
+        print('  CHANGAN: Playwright не установлен, используем fallback')
+    except Exception as e:
+        print(f'  CHANGAN: Playwright ошибка: {e}, используем fallback')
 
-    # ── Fallback: JSON в data-page (старый формат Inertia.js) ────────────────
-    soup = BeautifulSoup(html, 'html.parser')
-    div = soup.find('div', id='app')
-    if div:
-        raw_attr = div.get('data-page', '')
-        if raw_attr:
-            try:
-                data = json.loads(raw_attr)
-                json_tables = data.get('props', {}).get('data', {}).get('tables', [])
-                target = subbrand
-                seen = set()
-                result = []
-                for t in json_tables:
-                    if target and t.get('name', '') != target:
-                        continue
-                    for row in t.get('rows', []):
-                        city = clean_city(re.sub(r'\s*\(.*?\)', '', row.get('city', '').strip()))
-                        if is_valid_city(city) and city not in seen:
-                            seen.add(city)
-                            result.append(city)
-                if result:
-                    return result
-            except Exception:
-                pass
-
-    return []
+    return FALLBACK.get(subbrand, [])
 
 
 def get_volga_cities_tilda(html):
