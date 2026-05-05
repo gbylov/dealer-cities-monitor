@@ -95,7 +95,7 @@ def fetch(url, retries=2, delay=3, timeout=15):
 
 def clean_city(text):
     text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('\xa0', ' ').replace('&nbsp;', ' ')
+    text = text.replace('\xa0', ' ').replace('&nbsp;', ' ').replace('&nbsp', ' ')
     text = text.strip(' .:()«»"\'\n\r\t')
     return ' '.join(text.split())
 
