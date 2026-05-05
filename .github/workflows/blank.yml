@@ -23,15 +23,18 @@ jobs:
           pip install requests beautifulsoup4 pandas openpyxl
 
       # 🔍 Отладка (можно потом удалить)
-      - name: Debug env
+           - name: Debug env
+        env:
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
-          echo "EMAIL_FROM=$EMAIL_FROM"
+          echo "EMAIL_FROM exists: ${{ secrets.EMAIL_FROM != '' }}"
+          echo "EMAIL_PASSWORD exists: ${{ secrets.EMAIL_PASSWORD != '' }}"
 
       - name: Run script
         env:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
         run: python dealer_cities_monitor.py
