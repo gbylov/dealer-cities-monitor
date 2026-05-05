@@ -304,74 +304,78 @@ def get_gaz_cities(url):
         return fallback
 
 
-def get_changan_cities(html, brand=None):
+def get_changan_cities_from_table(html, subbrand=None):
+    """
+    changanauto.ru теперь рендерит города в HTML-таблицах (Vue SSR).
+    Каждая таблица соответствует суббренду (changan, uni, avatr, deepal).
+    Первый <td> каждой строки — название города.
+    Таблицы идут последовательно, порядок: changan, uni, avatr, deepal.
+    """
     soup = BeautifulSoup(html, 'html.parser')
-    div = soup.find('div', id='app')
+    tables = soup.find_all('table')
 
-    if not div:
-        print('  CHANGAN: div#app не найден')
-        return []
+    # Маппинг суббренда на индекс таблицы
+    subbrand_index = {'changan': 0, 'uni': 1, 'avatr': 2, 'deepal': 3}
 
-    raw_attr = div.get('data-page', '')
-
-    if not raw_attr:
-        print('  CHANGAN: data-page пустой')
-        # Пробуем найти данные в script-теге (альтернативный рендеринг)
-        for script in soup.find_all('script'):
-            if script.string and 'tables' in script.string and 'changan' in script.string:
-                print(f'  CHANGAN: найден script с данными, длина {len(script.string)}')
-                try:
-                    m = re.search(r'\{.*"tables".*\}', script.string, re.DOTALL)
-                    if m:
-                        data = json.loads(m.group(0))
-                        print(f'  CHANGAN: данные из script извлечены')
-                        tables = data.get('tables', [])
-                        if tables:
-                            target = (brand or {}).get('subbrand')
-                            seen = set()
-                            cities = []
-                            for t in tables:
-                                if target and t.get('name', '') != target:
-                                    continue
-                                for row in t.get('rows', []):
-                                    city = clean_city(re.sub(r'\s*\(.*?\)', '', row.get('city', '').strip()))
-                                    if is_valid_city(city) and city not in seen:
-                                        seen.add(city)
-                                        cities.append(city)
-                            return cities
-                except Exception as e:
-                    print(f'  CHANGAN: ошибка парсинга script: {e}')
-        print(f'  CHANGAN: HTML размер {len(html)}, первые 200 символов body: {soup.body.get_text()[:200] if soup.body else "нет body"}')
-        return []
-
-    print(f'  CHANGAN: data-page найден, длина {len(raw_attr)}')
-    try:
-        data = json.loads(raw_attr)
-    except Exception as e:
-        print(f'  CHANGAN: ошибка json.loads: {e}')
-        return []
-
-    tables = data.get('props', {}).get('data', {}).get('tables', [])
-    print(f'  CHANGAN: таблиц найдено: {len(tables)}')
-    target = (brand or {}).get('subbrand')
+    if subbrand and subbrand in subbrand_index:
+        idx = subbrand_index[subbrand]
+        target_tables = [tables[idx]] if idx < len(tables) else []
+    else:
+        target_tables = tables
 
     seen = set()
     cities = []
-
-    for t in tables:
-        if target and t.get('name', '') != target:
-            continue
-
-        for row in t.get('rows', []):
-            city = row.get('city', '').strip()
-            city_clean = re.sub(r'\s*\(.*?\)', '', city).strip()
-            city_clean = clean_city(city_clean)
-
-            if is_valid_city(city_clean) and city_clean not in seen:
-                seen.add(city_clean)
-                cities.append(city_clean)
-
+    for table in target_tables:
+        for row in table.find_all('tr')[1:]:  # пропускаем заголовок
+            tds = row.find_all('td')
+            if tds:
+                city = clean_city(tds[0].get_text())
+                if is_valid_city(city) and city not in seen:
+                    seen.add(city)
+                    cities.append(city)
     return cities
+
+
+def get_changan_cities(html, brand=None):
+    """
+    changanauto.ru — Vue SSR.
+    Города рендерятся в HTML-таблицах (приоритет).
+    Fallback: JSON в data-page атрибуте div#app (старый формат).
+    Порядок таблиц: changan=0, uni=1, avatr=2, deepal=3.
+    """
+    subbrand = (brand or {}).get('subbrand')
+
+    # ── Приоритет 1: HTML-таблицы (новый формат Vue SSR) ─────────────────────
+    cities = get_changan_cities_from_table(html, subbrand)
+    if cities:
+        return cities
+
+    # ── Fallback: JSON в data-page (старый формат Inertia.js) ────────────────
+    soup = BeautifulSoup(html, 'html.parser')
+    div = soup.find('div', id='app')
+    if div:
+        raw_attr = div.get('data-page', '')
+        if raw_attr:
+            try:
+                data = json.loads(raw_attr)
+                json_tables = data.get('props', {}).get('data', {}).get('tables', [])
+                target = subbrand
+                seen = set()
+                result = []
+                for t in json_tables:
+                    if target and t.get('name', '') != target:
+                        continue
+                    for row in t.get('rows', []):
+                        city = clean_city(re.sub(r'\s*\(.*?\)', '', row.get('city', '').strip()))
+                        if is_valid_city(city) and city not in seen:
+                            seen.add(city)
+                            result.append(city)
+                if result:
+                    return result
+            except Exception:
+                pass
+
+    return []
 
 
 def get_volga_cities_tilda(html):
