@@ -15,7 +15,7 @@ EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 EMAIL_TO = 'g.bylov@tmgauto.ru'
 
 SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.mail.ru')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', '465'))
+SMTP_PORT = int(os.environ.get('SMTP_PORT') or 465)
 
 CITIES_FILE = 'dealer_cities.json'
 MSK = timezone(timedelta(hours=3))
