@@ -2,12 +2,19 @@ import os
 import json
 import re
 import time
+import smtplib
 import requests
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+EMAIL_FROM     = os.environ.get('EMAIL_FROM', '')
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', '')
+EMAIL_TO       = 'g.bylov@tmgauto.ru'
+EMAIL_TO_2     = 'a.vasiliev@inter-bel.ru'
 
 CITIES_FILE = 'dealer_cities.json'
 MSK = timezone(timedelta(hours=3))
@@ -592,6 +599,58 @@ def build_telegram_text(results, changes, today_str):
     return '\n'.join(lines)
 
 
+def build_email_html(results, today_str):
+    rows = ''
+    for brand_name, cities in results.items():
+        if cities:
+            cities_str = ', '.join(cities)
+        else:
+            cities_str = '<span style="color:#999;font-style:italic">—</span>'
+        rows += f"""<tr>
+            <td style="padding:8px 16px;border-bottom:1px solid #eee;
+                font-weight:bold;color:#c00;vertical-align:top;white-space:nowrap">
+                {brand_name}</td>
+            <td style="padding:8px 16px;border-bottom:1px solid #eee">
+                {cities_str}</td>
+        </tr>"""
+    return f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:800px;margin:0 auto">
+    <h2 style="background:#222;color:white;padding:16px;margin:0">
+        Города для поиска дилеров
+    </h2>
+    <p style="padding:10px 16px;background:#f9f9f9;margin:0;font-size:12px;color:#666">
+        Данные на {today_str} · Источник: официальные сайты производителей
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#f0f0f0">
+            <th style="padding:8px 16px;text-align:left;width:160px">Бренд</th>
+            <th style="padding:8px 16px;text-align:left">Открытые города</th>
+        </tr>
+        {rows}
+    </table>
+    <p style="padding:12px 16px;font-size:11px;color:#999">
+        Автоматический мониторинг · TMG Auto · Обновлено {today_str}
+    </p>
+    </body></html>"""
+
+
+def send_email(subject, body_html):
+    if not EMAIL_FROM or not EMAIL_PASSWORD:
+        print('Email не отправлен: EMAIL_FROM или EMAIL_PASSWORD не заданы')
+        return
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From']    = EMAIL_FROM
+    msg['To']      = EMAIL_TO
+    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+    try:
+        with smtplib.SMTP_SSL('smtp.mail.ru', 465) as server:
+            server.login(EMAIL_FROM, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_FROM, [EMAIL_TO, EMAIL_TO_2], msg.as_string())
+        print('Письмо отправлено успешно')
+    except Exception as e:
+        print(f'Ошибка отправки письма: {e}')
+
+
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print('Telegram не отправлен: TELEGRAM_TOKEN или TELEGRAM_CHAT_ID не заданы')
@@ -666,5 +725,9 @@ if __name__ == '__main__':
     print('Отправляем в Telegram...')
     telegram_text = build_telegram_text(new_data, changes, today)
     send_telegram(telegram_text)
+
+    print('Отправляем письмо...')
+    html = build_email_html(new_data, today)
+    send_email(f'Города для дилерства — {today}', html)
 
     print('\n=== Готово ===')
