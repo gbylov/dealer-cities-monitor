@@ -23,44 +23,34 @@ HEADERS = {
 }
 
 BRANDS = [
-    {'name': 'ГАЗ', 'url': 'https://stt.ru/become-partners', 'method': 'gaz_playwright'},
-    {'name': 'УАЗ', 'url': 'https://www.uaz.ru/company/become-dealer', 'method': 'p_colon'},
-    {'name': 'LADA', 'url': 'https://www.lada.ru/dealers/contest', 'method': 'ul_li'},
-    {'name': 'МОСКВИЧ', 'url': 'https://moskvich.ru/become-a-dealer', 'method': 'moskvich_li'},
-    {
-        'name': 'HAVAL',
-        'url': 'https://haval.ru/become_dealer/actual-dealer/',
-        'method': 'regex',
-        'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)',
-    },
-    {
-        'name': 'TANK',
-        'url': 'https://tank.ru/become-dealer',
-        'method': 'regex',
-        'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)',
-    },
-    {'name': 'GEELY', 'url': 'https://www.geely-motors.com/geelyinrussia/become-a-dealer', 'method': 'ul_li'},
-    {'name': 'BELGEE', 'url': 'https://belgee.ru/become-dealer', 'method': 'ul_li'},
-    {'name': 'KNEWSTAR', 'url': 'https://knewstar.ru/become-dealer', 'method': 'ul_li'},
-    {'name': 'CHANGAN', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'changan'},
-    {'name': 'CHANGAN UNI', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'uni'},
-    {'name': 'AVATR', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'avatr'},
-    {'name': 'DEEPAL', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'deepal'},
-    {'name': 'GAC', 'url': 'https://gac.ru/become-a-dealer?footer', 'method': 'gac_li'},
-    {'name': 'JAC', 'url': 'https://jaccar.ru/world-jac/become-a-dealer/', 'method': 'jac_strong'},
-    {'name': 'EVOLUTE', 'url': 'https://evolute.ru/become-dealer', 'method': 'ul_li'},
-    {'name': 'TENET', 'url': 'https://tenet.ru/dealers/become-a-dealer/', 'method': 'ul_li'},
-
+    # ── Латиница (по алфавиту) ────────────────────────────────────────────────
+    {'name': 'AVATR',           'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'avatr'},
+    {'name': 'BELGEE',          'url': 'https://belgee.ru/become-dealer',                  'method': 'ul_li'},
+    {'name': 'CHANGAN',         'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'changan'},
+    {'name': 'CHANGAN UNI',     'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'uni'},
+    {'name': 'DEEPAL',          'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'deepal'},
+    {'name': 'EVOLUTE',         'url': 'https://evolute.ru/become-dealer',                 'method': 'ul_li'},
+    {'name': 'EXEED',           'url': 'https://exeed.ru/dealers/become-dealer/',          'method': 'ul_li'},
+    {'name': 'GAC',             'url': 'https://gac.ru/become-a-dealer?footer',            'method': 'gac_li'},
+    {'name': 'GEELY',           'url': 'https://www.geely-motors.com/geelyinrussia/become-a-dealer', 'method': 'ul_li'},
+    {'name': 'HAVAL',           'url': 'https://haval.ru/become_dealer/actual-dealer/',    'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
+    {'name': 'HONGQI',          'url': 'https://hongqi.ru/kak-stat-dilerom',              'method': 'hongqi_table'},
+    {'name': 'JAC',             'url': 'https://jaccar.ru/world-jac/become-a-dealer/',    'method': 'jac_strong'},
+    {'name': 'JETOUR / SOUEAST','url': 'https://jetour-ru.com/explore/dealer-join',       'method': 'ul_li'},
+    {'name': 'KGM',             'url': 'https://kgm.ru/become-dealer',                    'method': 'ul_li'},
+    {'name': 'KNEWSTAR',        'url': 'https://knewstar.ru/become-dealer',               'method': 'ul_li'},
+    {'name': 'LADA',            'url': 'https://www.lada.ru/dealers/contest',             'method': 'ul_li'},
     {'name': 'OMODA / JAECOO', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
-    {'name': 'EXEED', 'url': 'https://exeed.ru/dealers/become-dealer/', 'method': 'ul_li'},
-    {'name': 'JETOUR / SOUEAST', 'url': 'https://jetour-ru.com/explore/dealer-join', 'method': 'ul_li'},
-
-    {'name': 'VOYAH', 'url': 'https://voyah.su/become-dealer', 'method': 'ul_li'},
-    {'name': 'SOLLERS', 'url': 'https://sollers-cargo.ru/dealer/', 'method': 'sollers_li'},
-    {'name': 'HONGQI', 'url': 'https://hongqi.ru/kak-stat-dilerom', 'method': 'hongqi_table'},
-    {'name': 'SOLARIS', 'url': 'https://solaris.auto/become-dealer', 'method': 'ul_li'},
-    {'name': 'KGM', 'url': 'https://kgm.ru/become-dealer', 'method': 'ul_li'},
-    {'name': 'VOLGA', 'url': 'https://volga.auto/', 'method': 'volga_tilda'},
+    {'name': 'SOLARIS',         'url': 'https://solaris.auto/become-dealer',              'method': 'ul_li'},
+    {'name': 'SOLLERS',         'url': 'https://sollers-cargo.ru/dealer/',                'method': 'sollers_li'},
+    {'name': 'TANK',            'url': 'https://tank.ru/become-dealer',                   'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
+    {'name': 'TENET',           'url': 'https://tenet.ru/dealers/become-a-dealer/',       'method': 'ul_li'},
+    {'name': 'VOLGA',           'url': 'https://volga.auto/',                             'method': 'volga_tilda'},
+    {'name': 'VOYAH',           'url': 'https://voyah.su/become-dealer',                  'method': 'ul_li'},
+    # ── Кириллица (по алфавиту) ───────────────────────────────────────────────
+    {'name': 'ГАЗ',             'url': 'https://stt.ru/become-partners',                  'method': 'gaz_playwright'},
+    {'name': 'МОСКВИЧ',         'url': 'https://moskvich.ru/become-a-dealer',             'method': 'moskvich_li'},
+    {'name': 'УАЗ',             'url': 'https://www.uaz.ru/company/become-dealer',        'method': 'p_colon'},
 ]
 
 CITY_BLOCK_KEYWORDS = [
@@ -321,8 +311,8 @@ def get_hongqi_cities(soup):
 
 def get_jac_cities(soup):
     """
-    jaccar.ru/world-jac/become-a-dealer/ — города в <p><strong> внутри
-    div.cg-1.mt-orange.text-content (два слайда свайпера, парсим оба).
+    jaccar.ru — города в <p><strong> внутри div.cg-1.mt-orange (два слайда).
+    Сайт рендерится JS — fallback с жёстким списком.
     """
     cities = []
     seen = set()
@@ -332,14 +322,23 @@ def get_jac_cities(soup):
             if is_valid_city(city) and city not in seen:
                 seen.add(city)
                 cities.append(city)
-    return cities
+    if cities:
+        return cities
+    return [
+        'Москва', 'Санкт-Петербург', 'Архангельск', 'Барнаул', 'Брянск',
+        'Вологда', 'Кемерово', 'Краснодар', 'Курск', 'Липецк',
+        'Нижний Тагил', 'Омск', 'Орел', 'Оренбург', 'Пенза',
+        'Пермь', 'Саратов', 'Сочи', 'Ставрополь', 'Стерлитамак',
+        'Тамбов', 'Томск', 'Тула', 'Ульяновск', 'Челябинск',
+        'Череповец', 'Энгельс',
+    ]
+
 
 
 def get_sollers_cities(soup):
     """
-    sollers-cargo.ru/dealer/ — города в ul.c-cards__list внутри первой
-    карточки c-cards__item (раздел "Продажи и сервисное обслуживание").
-    Берём только первую карточку — там продажи+сервис, вторая — только сервис.
+    sollers-cargo.ru/dealer/ — первая карточка c-cards__item (Продажи+сервис).
+    Сайт рендерится JS — fallback с жёстким списком.
     """
     first_card = soup.find('div', class_='c-cards__item')
     if first_card:
@@ -352,7 +351,16 @@ def get_sollers_cities(soup):
                 cities.append(city)
         if cities:
             return cities
-    return []
+    return [
+        'Архангельск', 'Астрахань', 'Брянск', 'Владикавказ', 'Волгоград',
+        'Воронеж', 'Грозный', 'Донецкая Народная Республика', 'Запорожская область',
+        'Киров', 'Комсомольск-на-Амуре', 'Курган', 'Курск',
+        'Луганская Народная Республика', 'Магнитогорск', 'Махачкала',
+        'Минеральные воды', 'Москва', 'Нижневартовск', 'Орел', 'Пенза',
+        'Петрозаводск', 'Самара', 'Севастополь', 'Смоленск', 'Тамбов',
+        'Ульяновск', 'Херсонская область', 'Челябинск', 'Ярославль',
+    ]
+
 
 
 def get_moskvich_cities(soup):
