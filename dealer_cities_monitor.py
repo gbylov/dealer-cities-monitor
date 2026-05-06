@@ -50,7 +50,7 @@ BRANDS = [
     {'name': 'JAC', 'url': 'https://jac.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'EVOLUTE', 'url': 'https://evolute.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'TENET', 'url': 'https://tenet.ru/dealers/become-a-dealer/', 'method': 'ul_li'},
-    {'name': 'OMODA', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
+
     {'name': 'OMODA / JAECOO', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
     {'name': 'EXEED', 'url': 'https://exeed.ru/dealers/become-dealer/', 'method': 'ul_li'},
     {'name': 'JETOUR / SOUEAST', 'url': 'https://jetour-ru.com/explore/dealer-join', 'method': 'ul_li'},
@@ -290,25 +290,32 @@ def get_gac_dealer_cities(soup):
 
 def get_hongqi_cities(soup):
     """
-    hongqi.ru/kak-stat-dilerom — города в HTML-таблице после фразы
-    "Города, в которых мы ищем партнеров".
-    Каждая ячейка <td> — один город.
+    hongqi.ru/kak-stat-dilerom — таблица рендерится JS, с сервера не приходит.
+    Используем жёстко прописанный список (27 городов).
+    Обновлять вручную при изменениях.
     """
-    keyword = 'в которых мы ищем'
-    for tag in soup.find_all(['p', 'h2', 'h3', 'h4', 'div', 'span']):
-        if keyword in tag.get_text().lower():
-            table = tag.find_next('table')
-            if table:
-                cities = []
-                seen = set()
-                for td in table.find_all('td'):
-                    city = clean_city(td.get_text())
-                    if is_valid_city(city) and city not in seen:
-                        seen.add(city)
-                        cities.append(city)
-                if cities:
-                    return cities
-    return []
+    # Пробуем парсить на случай если страница вдруг отдаст таблицу
+    for table in soup.find_all('table'):
+        cities = []
+        seen = set()
+        for td in table.find_all('td'):
+            city = clean_city(td.get_text())
+            if is_valid_city(city) and city not in seen:
+                seen.add(city)
+                cities.append(city)
+        if len(cities) >= 5:
+            return cities
+    # Fallback — последний известный список
+    return [
+        'Астрахань', 'Киров', 'Уфа', 'Волгоград',
+        'Минеральные Воды', 'Абакан', 'Ставрополь', 'Ижевск',
+        'Оренбург', 'Чебоксары', 'Сыктывкар', 'Липецк',
+        'Ульяновск', 'Тольятти', 'Барнаул', 'Омск',
+        'Пенза', 'Нижнекамск', 'Саранск', 'Тверь',
+        'Магнитогорск', 'Саратов', 'Стерлитамак', 'Аксай',
+        'Курск', 'Смоленск', 'Сызрань',
+    ]
+
 
 
 def get_moskvich_cities(soup):
