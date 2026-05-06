@@ -47,7 +47,7 @@ BRANDS = [
     {'name': 'AVATR', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'avatr'},
     {'name': 'DEEPAL', 'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'deepal'},
     {'name': 'GAC', 'url': 'https://gac.ru/become-a-dealer?footer', 'method': 'gac_li'},
-    {'name': 'JAC', 'url': 'https://jac.ru/become-dealer', 'method': 'ul_li'},
+    {'name': 'JAC', 'url': 'https://jaccar.ru/world-jac/become-a-dealer/', 'method': 'jac_strong'},
     {'name': 'EVOLUTE', 'url': 'https://evolute.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'TENET', 'url': 'https://tenet.ru/dealers/become-a-dealer/', 'method': 'ul_li'},
 
@@ -56,6 +56,7 @@ BRANDS = [
     {'name': 'JETOUR / SOUEAST', 'url': 'https://jetour-ru.com/explore/dealer-join', 'method': 'ul_li'},
 
     {'name': 'VOYAH', 'url': 'https://voyah.su/become-dealer', 'method': 'ul_li'},
+    {'name': 'SOLLERS', 'url': 'https://sollers-cargo.ru/dealer/', 'method': 'sollers_li'},
     {'name': 'HONGQI', 'url': 'https://hongqi.ru/kak-stat-dilerom', 'method': 'hongqi_table'},
     {'name': 'SOLARIS', 'url': 'https://solaris.auto/become-dealer', 'method': 'ul_li'},
     {'name': 'KGM', 'url': 'https://kgm.ru/become-dealer', 'method': 'ul_li'},
@@ -316,6 +317,42 @@ def get_hongqi_cities(soup):
         'Курск', 'Смоленск', 'Сызрань',
     ]
 
+
+
+def get_jac_cities(soup):
+    """
+    jaccar.ru/world-jac/become-a-dealer/ — города в <p><strong> внутри
+    div.cg-1.mt-orange.text-content (два слайда свайпера, парсим оба).
+    """
+    cities = []
+    seen = set()
+    for block in soup.find_all('div', class_=lambda c: c and 'mt-orange' in c and 'text-content' in c):
+        for strong in block.find_all('strong'):
+            city = clean_city(strong.get_text())
+            if is_valid_city(city) and city not in seen:
+                seen.add(city)
+                cities.append(city)
+    return cities
+
+
+def get_sollers_cities(soup):
+    """
+    sollers-cargo.ru/dealer/ — города в ul.c-cards__list внутри первой
+    карточки c-cards__item (раздел "Продажи и сервисное обслуживание").
+    Берём только первую карточку — там продажи+сервис, вторая — только сервис.
+    """
+    first_card = soup.find('div', class_='c-cards__item')
+    if first_card:
+        cities = []
+        seen = set()
+        for li in first_card.find_all('li'):
+            city = clean_city(li.get_text())
+            if is_valid_city(city) and city not in seen:
+                seen.add(city)
+                cities.append(city)
+        if cities:
+            return cities
+    return []
 
 
 def get_moskvich_cities(soup):
