@@ -51,12 +51,12 @@ BRANDS = [
     {'name': 'EVOLUTE', 'url': 'https://evolute.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'TENET', 'url': 'https://tenet.ru/dealers/become-a-dealer/', 'method': 'ul_li'},
     {'name': 'OMODA', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
-    {'name': 'JAECOO', 'url': 'https://jaecoo.ru/jaecoo-dealers/become-a-dealer/', 'method': 'ul_li'},
+    {'name': 'OMODA / JAECOO', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
     {'name': 'EXEED', 'url': 'https://exeed.ru/dealers/become-dealer/', 'method': 'ul_li'},
-    {'name': 'JETOUR', 'url': 'https://jetour-ru.com/explore/dealer-join', 'method': 'ul_li'},
-    {'name': 'SOUEAST', 'url': 'https://soueast.ru/dealer-join', 'method': 'ul_li'},
+    {'name': 'JETOUR / SOUEAST', 'url': 'https://jetour-ru.com/explore/dealer-join', 'method': 'ul_li'},
+
     {'name': 'VOYAH', 'url': 'https://voyah.su/become-dealer', 'method': 'ul_li'},
-    {'name': 'HONGQI', 'url': 'https://hongqi.ru/kak-stat-dilerom', 'method': 'ul_li'},
+    {'name': 'HONGQI', 'url': 'https://hongqi.ru/kak-stat-dilerom', 'method': 'hongqi_table'},
     {'name': 'SOLARIS', 'url': 'https://solaris.auto/become-dealer', 'method': 'ul_li'},
     {'name': 'KGM', 'url': 'https://kgm.ru/become-dealer', 'method': 'ul_li'},
     {'name': 'VOLGA', 'url': 'https://volga.auto/', 'method': 'volga_tilda'},
@@ -288,6 +288,29 @@ def get_gac_dealer_cities(soup):
     return []
 
 
+def get_hongqi_cities(soup):
+    """
+    hongqi.ru/kak-stat-dilerom — города в HTML-таблице после фразы
+    "Города, в которых мы ищем партнеров".
+    Каждая ячейка <td> — один город.
+    """
+    keyword = 'в которых мы ищем'
+    for tag in soup.find_all(['p', 'h2', 'h3', 'h4', 'div', 'span']):
+        if keyword in tag.get_text().lower():
+            table = tag.find_next('table')
+            if table:
+                cities = []
+                seen = set()
+                for td in table.find_all('td'):
+                    city = clean_city(td.get_text())
+                    if is_valid_city(city) and city not in seen:
+                        seen.add(city)
+                        cities.append(city)
+                if cities:
+                    return cities
+    return []
+
+
 def get_moskvich_cities(soup):
     """
     moskvich.ru/become-a-dealer — города в ul/li внутри div.dealer_tender_block2
@@ -455,7 +478,9 @@ def get_cities(brand, html_cache=None):
 
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    if method == 'moskvich_li':
+    if method == 'hongqi_table':
+        cities = get_hongqi_cities(soup)
+    elif method == 'moskvich_li':
         cities = get_moskvich_cities(soup)
     elif method == 'gac_li':
         cities = get_gac_dealer_cities(soup)
@@ -502,27 +527,11 @@ def build_telegram_text(results, changes, today_str):
     lines.append(f'📊 Города для дилерства — {today_str}')
     lines.append('')
 
-    has_changes = any(v for v in changes.values())
-
-    if has_changes:
-        lines.append('🔔 Изменения:')
-        for brand_name, brand_changes in changes.items():
-            for change in brand_changes:
-                lines.append(f'{brand_name}: {change}')
-        lines.append('')
-    else:
-        lines.append('🔕 Изменений с прошлого запуска не найдено.')
-        lines.append('')
-
-    lines.append('📍 Текущая картина:')
-
     for brand_name, cities in results.items():
         if cities:
-            preview = ', '.join(cities[:12])
-            suffix = f' … ещё {len(cities) - 12}' if len(cities) > 12 else ''
-            lines.append(f'• {brand_name}: {preview}{suffix}')
+            lines.append(f'• {brand_name}: {", ".join(cities)}')
         else:
-            lines.append(f'• {brand_name}: нет данных / не найдено')
+            lines.append(f'• {brand_name}: —')
 
     return '\n'.join(lines)
 
