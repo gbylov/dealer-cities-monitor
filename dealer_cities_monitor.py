@@ -530,7 +530,11 @@ def get_cities(brand, html_cache=None):
 
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    if method == 'hongqi_table':
+    if method == 'jac_strong':
+        cities = get_jac_cities(soup)
+    elif method == 'sollers_li':
+        cities = get_sollers_cities(soup)
+    elif method == 'hongqi_table':
         cities = get_hongqi_cities(soup)
     elif method == 'moskvich_li':
         cities = get_moskvich_cities(soup)
