@@ -485,37 +485,40 @@ def get_changan_cities(html, brand=None):
 
 def get_volga_cities_tilda(html):
     """
-    volga.auto/rasshireniye-dl — два списка городов:
-    1. Текущий конкурс: города в tn-atom рядом с датами DD.MM.YYYY
-    2. Перспективные: текстовый абзац со списком через запятую
+    volga.auto/rasshireniye-dl — возвращает список строк:
+    1. Текущий конкурс: "Город (DD.MM.YYYY)"
+    2. Разделитель с заголовком
+    3. Перспективные города
     """
     from bs4 import BeautifulSoup as _BS
     date_pattern = re.compile(r'\d{2}\.\d{2}\.\d{4}')
-    cities = []
-    seen = set()
+    result = []
+    seen_current = set()
+    seen_future = set()
 
     soup = _BS(html, 'html.parser')
 
-    # ── Группа 1: текущий конкурс ─────────────────────────────────────────────
-    # Ищем все tn-atom. Если рядом (в том же родителе или соседнем блоке)
-    # есть дата — значит это строка таблицы конкурса.
-    # Стратегия: находим все molecule-блоки где есть хотя бы одна дата,
-    # и из них берём не-даты.
+    # ── Текущий конкурс: molecule-блоки с датами ──────────────────────────────
+    current = []
     for molecule in soup.find_all('div', id=re.compile(r'molecule-')):
         atoms = molecule.find_all('div', class_='tn-atom')
         texts = [a.get_text(strip=True) for a in atoms]
-        has_date = any(date_pattern.search(t) for t in texts)
-        if has_date:
-            for t in texts:
-                if (t
-                        and not date_pattern.search(t)
-                        and 2 <= len(t) <= 40
-                        and any(c.isalpha() for c in t)
-                        and t not in seen):
-                    seen.add(t)
-                    cities.append(t)
+        dates = [t for t in texts if date_pattern.search(t)]
+        non_dates = [t for t in texts
+                     if not date_pattern.search(t)
+                     and 2 <= len(t) <= 40
+                     and any(c.isalpha() for c in t)]
+        if dates and non_dates:
+            for city in non_dates:
+                if city not in seen_current:
+                    seen_current.add(city)
+                    current.append(f'{city} ({dates[0]})')
 
-    # ── Группа 2: перспективные из абзаца ────────────────────────────────────
+    if current:
+        result.extend(current)
+
+    # ── Перспективные: абзац «планирует» ─────────────────────────────────────
+    future = []
     for tag in soup.find_all(['p', 'div']):
         text = tag.get_text(' ', strip=True)
         if 'планирует' in text.lower() and len(text) > 50:
@@ -523,12 +526,15 @@ def get_volga_cities_tilda(html):
             part = re.split(r'Возможно', part)[0]
             for city in re.split(r'[,;]', part):
                 city = clean_city(city.strip('.').strip())
-                if is_valid_city(city) and city not in seen:
-                    seen.add(city)
-                    cities.append(city)
+                if is_valid_city(city) and city not in seen_future:
+                    seen_future.add(city)
+                    future.append(city)
             break
 
-    return cities
+    if future:
+        result.append('На последующих этапах: ' + ', '.join(future))
+
+    return result
 
 
 
