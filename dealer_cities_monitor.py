@@ -486,29 +486,34 @@ def get_changan_cities(html, brand=None):
 def get_volga_cities_tilda(html):
     """
     volga.auto/rasshireniye-dl — два списка городов:
-    1. Текущий конкурс: города в блоках tn-atom (Tilda Zero Block),
-       рядом с каждым городом дата в формате DD.MM.YYYY — её пропускаем.
-    2. Перспективные: текстовый абзац с перечислением через запятую.
-    Объединяем оба.
+    1. Текущий конкурс: города в tn-atom рядом с датами DD.MM.YYYY
+    2. Перспективные: текстовый абзац со списком через запятую
     """
     from bs4 import BeautifulSoup as _BS
-    import json as _json
-    date_pattern = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')
+    date_pattern = re.compile(r'\d{2}\.\d{2}\.\d{4}')
     cities = []
     seen = set()
 
     soup = _BS(html, 'html.parser')
 
-    # ── Группа 1: текущий конкурс из tn-atom ──────────────────────────────────
-    for atom in soup.find_all('div', class_='tn-atom'):
-        text = atom.get_text(strip=True)
-        if (text
-                and not date_pattern.match(text)
-                and 2 <= len(text) <= 40
-                and any(c.isalpha() for c in text)
-                and text not in seen):
-            seen.add(text)
-            cities.append(text)
+    # ── Группа 1: текущий конкурс ─────────────────────────────────────────────
+    # Ищем все tn-atom. Если рядом (в том же родителе или соседнем блоке)
+    # есть дата — значит это строка таблицы конкурса.
+    # Стратегия: находим все molecule-блоки где есть хотя бы одна дата,
+    # и из них берём не-даты.
+    for molecule in soup.find_all('div', id=re.compile(r'molecule-')):
+        atoms = molecule.find_all('div', class_='tn-atom')
+        texts = [a.get_text(strip=True) for a in atoms]
+        has_date = any(date_pattern.search(t) for t in texts)
+        if has_date:
+            for t in texts:
+                if (t
+                        and not date_pattern.search(t)
+                        and 2 <= len(t) <= 40
+                        and any(c.isalpha() for c in t)
+                        and t not in seen):
+                    seen.add(t)
+                    cities.append(t)
 
     # ── Группа 2: перспективные из абзаца ────────────────────────────────────
     for tag in soup.find_all(['p', 'div']):
