@@ -52,7 +52,7 @@ BRANDS = [
     {'name': 'SOLLERS',         'url': 'https://sollers-cargo.ru/dealer/',                'method': 'sollers_li'},
     {'name': 'TANK',            'url': 'https://tank.ru/become-dealer',                   'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
     {'name': 'TENET',           'url': 'https://tenet.ru/dealers/become-a-dealer/',       'method': 'ul_li'},
-    {'name': 'VOLGA',           'url': 'https://volga.auto/',                             'method': 'volga_tilda'},
+    {'name': 'VOLGA',           'url': 'https://volga.auto/rasshireniye-dl',       'method': 'volga_tilda'},
     {'name': 'VOYAH',           'url': 'https://voyah.su/become-dealer',                  'method': 'ul_li'},
     # ── Кириллица (по алфавиту) ───────────────────────────────────────────────
     {'name': 'ГАЗ',             'url': 'https://stt.ru/become-partners',                  'method': 'gaz_playwright'},
@@ -484,31 +484,47 @@ def get_changan_cities(html, brand=None):
 
 
 def get_volga_cities_tilda(html):
-    pattern = r'"li_variants"\s*:\s*"((?:[^"\\]|\\.)*)"'
-    matches = re.findall(pattern, html)
+    """
+    volga.auto/rasshireniye-dl — два списка городов:
+    1. Текущий конкурс: города в блоках tn-atom (Tilda Zero Block),
+       рядом с каждым городом дата в формате DD.MM.YYYY — её пропускаем.
+    2. Перспективные: текстовый абзац с перечислением через запятую.
+    Объединяем оба.
+    """
+    from bs4 import BeautifulSoup as _BS
+    import json as _json
+    date_pattern = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')
+    cities = []
+    seen = set()
 
-    for raw_escaped in matches:
-        try:
-            decoded = json.loads('"' + raw_escaped + '"')
-        except Exception:
-            continue
+    soup = _BS(html, 'html.parser')
 
-        if '//' in decoded:
-            cities = []
-            seen = set()
+    # ── Группа 1: текущий конкурс из tn-atom ──────────────────────────────────
+    for atom in soup.find_all('div', class_='tn-atom'):
+        text = atom.get_text(strip=True)
+        if (text
+                and not date_pattern.match(text)
+                and 2 <= len(text) <= 40
+                and any(c.isalpha() for c in text)
+                and text not in seen):
+            seen.add(text)
+            cities.append(text)
 
-            for line in decoded.split('\n'):
-                if '//' in line:
-                    city = clean_city(line.split('//')[0].strip())
+    # ── Группа 2: перспективные из абзаца ────────────────────────────────────
+    for tag in soup.find_all(['p', 'div']):
+        text = tag.get_text(' ', strip=True)
+        if 'планирует' in text.lower() and len(text) > 50:
+            part = text.split(':', 1)[-1] if ':' in text else text
+            part = re.split(r'Возможно', part)[0]
+            for city in re.split(r'[,;]', part):
+                city = clean_city(city.strip('.').strip())
+                if is_valid_city(city) and city not in seen:
+                    seen.add(city)
+                    cities.append(city)
+            break
 
-                    if is_valid_city(city) and city not in seen:
-                        seen.add(city)
-                        cities.append(city)
+    return cities
 
-            if cities:
-                return cities
-
-    return []
 
 
 def get_cities(brand, html_cache=None):
