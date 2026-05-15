@@ -435,17 +435,17 @@ def get_changan_cities_from_table(html, subbrand=None):
 
 def get_changan_cities(html, brand=None):
     """
-    changanauto.ru — Vue CSR (клиентский рендеринг).
-    Таблицы появляются только после выполнения JS.
-    Используем Playwright чтобы дождаться таблиц, потом парсим HTML.
-    Порядок таблиц: changan=0, uni=1, avatr=2, deepal=3.
+    changanauto.ru — данные в <script data-page="app" type="application/json">.
+    Структура: props.data.tables — список суббрендов.
     Fallback: жёстко прописанные города из последнего известного состояния.
     """
     FALLBACK = {
-        'changan': ['Березники', 'Владивосток', 'Волгоград', 'Кемерово',
-                    'Майкоп', 'Нефтекамск', 'Обнинск', 'Псков', 'Хабаровск'],
-        'uni':     ['Березники', 'Владивосток', 'Волгоград', 'Кемерово',
-                    'Майкоп', 'Нефтекамск', 'Обнинск', 'Псков'],
+        'changan': ['Березники', 'Владивосток', 'Воронеж', 'Кемерово', 'Майкоп',
+                    'Москва', 'Нефтекамск', 'Нижний Новгород', 'Обнинск', 'Псков',
+                    'Санкт-Петербург', 'Хабаровск'],
+        'uni':     ['Березники', 'Владивосток', 'Воронеж', 'Кемерово', 'Майкоп',
+                    'Москва', 'Нефтекамск', 'Нижний Новгород', 'Обнинск', 'Псков',
+                    'Санкт-Петербург'],
         'avatr':   ['Владимир', 'Грозный', 'Иркутск', 'Кемерово', 'Красноярск',
                     'Минеральные Воды', 'Новороссийск', 'Омск', 'Ростов-на-Дону',
                     'Рязань', 'Самара', 'Саратов', 'Сочи', 'Тула', 'Ярославль'],
@@ -455,32 +455,35 @@ def get_changan_cities(html, brand=None):
     }
     subbrand = (brand or {}).get('subbrand')
 
-    # Кеш Playwright-рендеренного HTML чтобы не грузить страницу 4 раза
-    _CHANGAN_RENDERED = getattr(get_changan_cities, '_rendered_html', None)
-    if _CHANGAN_RENDERED is None:
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                page.goto('https://changanauto.ru/about-us/become-a-dealer',
-                          wait_until='networkidle', timeout=30000)
-                page.wait_for_selector('table', timeout=15000)
-                _CHANGAN_RENDERED = page.content()
-                browser.close()
-            get_changan_cities._rendered_html = _CHANGAN_RENDERED
-        except ImportError:
-            print('  CHANGAN: Playwright не установлен, используем fallback')
-            return FALLBACK.get(subbrand, [])
-        except Exception as e:
-            print(f'  CHANGAN: Playwright ошибка: {e}, используем fallback')
-            get_changan_cities._rendered_html = ''
-            return FALLBACK.get(subbrand, [])
-    if _CHANGAN_RENDERED:
-        result = get_changan_cities_from_table(_CHANGAN_RENDERED, subbrand)
-        if result:
-            return result
+    try:
+        from bs4 import BeautifulSoup as _BS
+        import json as _json
+
+        soup = _BS(html, 'html.parser')
+        # Данные в <script data-page="app" type="application/json">
+        script = soup.find('script', attrs={'data-page': 'app', 'type': 'application/json'})
+        if script and script.string:
+            data = _json.loads(script.string)
+            tables = data.get('props', {}).get('data', {}).get('tables', [])
+            if tables:
+                target = subbrand
+                seen = set()
+                cities = []
+                for t in tables:
+                    if target and t.get('name', '') != target:
+                        continue
+                    for row in t.get('rows', []):
+                        city = clean_city(row.get('city', ''))
+                        if is_valid_city(city) and city not in seen:
+                            seen.add(city)
+                            cities.append(city)
+                if cities:
+                    return cities
+    except Exception as e:
+        print(f'  CHANGAN: ошибка парсинга: {e}')
+
     return FALLBACK.get(subbrand, [])
+
 
 
 def get_volga_cities_tilda(html):
