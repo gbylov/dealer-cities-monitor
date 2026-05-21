@@ -52,8 +52,8 @@ BRANDS = [
     {'name': 'SOLLERS',         'url': 'https://sollers-cargo.ru/dealer/',                'method': 'sollers_li'},
     {'name': 'TANK',            'url': 'https://tank.ru/become-dealer',                   'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
     {'name': 'TENET',           'url': 'https://tenet.ru/dealers/become-a-dealer/',       'method': 'ul_li'},
-    {'name': 'VOLGA',           'url': 'https://volga.auto/stat-dilerom',           'method': 'volga_tilda'},
-    {'name': 'VOYAH',           'url': 'https://voyah.su/become-dealer',                  'method': 'ul_li'},
+    {'name': 'VOLGA',           'url': 'https://volga.auto/rasshireniye-dl',       'method': 'volga_tilda'},
+    {'name': 'VOYAH',           'url': 'https://voyah.su/voyah-space/dealerships?footer', 'method': 'voyah_li'},
     # ── Кириллица (по алфавиту) ───────────────────────────────────────────────
     {'name': 'ГАЗ',             'url': 'https://stt.ru/become-partners',                  'method': 'gaz_playwright'},
     {'name': 'МОСКВИЧ',         'url': 'https://moskvich.ru/become-a-dealer',             'method': 'moskvich_li'},
@@ -388,6 +388,27 @@ def get_moskvich_cities(soup):
     return []
 
 
+def get_voyah_cities(soup):
+    """
+    voyah.su — города в li.td-text-fade внутри div.d-none.d-md-block.
+    Берём только десктопный блок (без дублей мобильной версии).
+    """
+    block = soup.find('div', class_=lambda c: c and 'd-none' in c and 'd-md-block' in c)
+    if block:
+        cities = []
+        seen = set()
+        for li in block.find_all('li', class_='td-text-fade'):
+            city = clean_city(li.get_text())
+            # Убираем пометки типа "(2-й дилерский центр)"
+            city = re.sub(r'\s*\(.*?\)', '', city).strip()
+            if is_valid_city(city) and city not in seen:
+                seen.add(city)
+                cities.append(city)
+        if cities:
+            return cities
+    return []
+
+
 def get_gaz_cities(url):
     """
     stt.ru/become-partners — дистрибьютор ГАЗ.
@@ -488,41 +509,56 @@ def get_changan_cities(html, brand=None):
 
 def get_volga_cities_tilda(html):
     """
-    volga.auto/stat-dilerom — города в поле li_variants формы Tilda.
-    Формат каждой строки: "Город // ДД.ММ.ГГГГ"
-    Первый элемент — заголовок ("Город // Дата подачи заявки"), пропускаем.
+    volga.auto/rasshireniye-dl — возвращает список строк:
+    1. Текущий конкурс: "Город (DD.MM.YYYY)"
+    2. Разделитель с заголовком
+    3. Перспективные города
     """
-    import json as _json
-    cities = []
-    seen = set()
+    from bs4 import BeautifulSoup as _BS
+    date_pattern = re.compile(r'\d{2}\.\d{2}\.\d{4}')
+    result = []
+    seen_current = set()
+    seen_future = set()
 
-    # Ищем все li_variants в HTML — нас интересует тот где значения с датами
-    matches = re.findall(r'"li_variants"\s*:\s*"((?:[^"\\]|\\.)*)"', html)
-    for raw in matches:
-        try:
-            decoded = _json.loads('"' + raw + '"')
-        except Exception:
-            continue
-        # Нужный блок содержит " // " с датой
-        if '//' not in decoded:
-            continue
-        for line in decoded.split('\n'):
-            line = line.strip()
-            if not line or '//' not in line:
-                continue
-            parts = line.split('//')
-            city = parts[0].strip()
-            date = parts[1].strip() if len(parts) > 1 else ''
-            # Пропускаем заголовок "Город // Дата подачи заявки"
-            if not re.match(r'\d{2}\.\d{2}\.\d{4}', date):
-                continue
-            if city and city not in seen:
-                seen.add(city)
-                cities.append(f'{city} ({date})')
-        if cities:
-            break  # нашли нужный блок
+    soup = _BS(html, 'html.parser')
 
-    return cities
+    # ── Текущий конкурс: molecule-блоки с датами ──────────────────────────────
+    current = []
+    for molecule in soup.find_all('div', id=re.compile(r'molecule-')):
+        atoms = molecule.find_all('div', class_='tn-atom')
+        texts = [a.get_text(strip=True) for a in atoms]
+        dates = [t for t in texts if date_pattern.search(t)]
+        non_dates = [t for t in texts
+                     if not date_pattern.search(t)
+                     and 2 <= len(t) <= 40
+                     and any(c.isalpha() for c in t)]
+        if dates and non_dates:
+            for city in non_dates:
+                if city not in seen_current:
+                    seen_current.add(city)
+                    current.append(f'{city} ({dates[0]})')
+
+    if current:
+        result.extend(current)
+
+    # ── Перспективные: абзац «планирует» ─────────────────────────────────────
+    future = []
+    for tag in soup.find_all(['p', 'div']):
+        text = tag.get_text(' ', strip=True)
+        if 'планирует' in text.lower() and len(text) > 50:
+            part = text.split(':', 1)[-1] if ':' in text else text
+            part = re.split(r'Возможно', part)[0]
+            for city in re.split(r'[,;]', part):
+                city = clean_city(city.strip('.').strip())
+                if is_valid_city(city) and city not in seen_future:
+                    seen_future.add(city)
+                    future.append(city)
+            break
+
+    if future:
+        result.append('На последующих этапах: ' + ', '.join(future))
+
+    return result
 
 
 
@@ -552,7 +588,9 @@ def get_cities(brand, html_cache=None):
 
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    if method == 'jac_strong':
+    if method == 'voyah_li':
+        cities = get_voyah_cities(soup)
+    elif method == 'jac_strong':
         cities = get_jac_cities(soup)
     elif method == 'sollers_li':
         cities = get_sollers_cities(soup)
