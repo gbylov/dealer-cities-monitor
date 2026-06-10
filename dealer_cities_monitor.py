@@ -497,6 +497,31 @@ def get_changan_cities(html, brand=None):
     return cities
 
 
+def get_volga_cities_tilda(html):
+    """
+    VOLGA rasshireniye-dl — города хранятся в JSON форм прямо в HTML (Tilda).
+    Ищем li_variants с датами в формате: Город // ДД.ММ.ГГГГ
+    """
+    import re as _re, json as _json
+    pattern = r'"li_variants"\s*:\s*"((?:[^"\\]|\\.)*)"'
+    matches = _re.findall(pattern, html)
+    for raw_escaped in matches:
+        try:
+            decoded = _json.loads('"' + raw_escaped + '"')
+        except Exception:
+            continue
+        if '//' in decoded:
+            cities = []
+            for line in decoded.split('\n'):
+                if '//' in line:
+                    city = line.split('//')[0].strip()
+                    if city and len(city) <= 40:
+                        cities.append(city)
+            if cities:
+                return cities
+    return []
+
+
 def get_volga_tradedealer_cities():
     """
     VOLGA stat-dilerom — форма через TradeDealer API.
