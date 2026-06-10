@@ -78,8 +78,7 @@ BRANDS = [
     {
         'name':   'TANK',
         'url':    'https://tank.ru/become-dealer',
-        'method': 'regex',
-        'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)',
+        'method': 'tank_ul',
         'note':   '',
     },
     {
@@ -382,6 +381,26 @@ def parse_regex(text, pattern):
 
 
 # ── Основная функция получения городов для одного бренда ──────────────────────
+def get_tank_cities(soup):
+    """
+    tank.ru/become-dealer — города в <ul><li> после <h3> с текстом
+    'Список городов России, в которых рассматривается открытие дилеров TANK'
+    """
+    for tag in soup.find_all(['h2', 'h3', 'h4']):
+        text = tag.get_text().lower()
+        if 'список городов' in text or 'рассматривается открытие' in text:
+            ul = tag.find_next('ul')
+            if ul:
+                cities = []
+                for li in ul.find_all('li'):
+                    city = li.get_text(strip=True)
+                    if 2 <= len(city) <= 40 and any(c.isalpha() for c in city):
+                        cities.append(city)
+                if cities:
+                    return cities
+    return []
+
+
 def get_omoda_dealer_cities(soup):
     """
     omoda.ru/omoda-dealers/become-a-dealer/
@@ -642,6 +661,8 @@ def get_cities(brand, html_cache=None):
 
     if method == 'omoda_li':
         cities = get_omoda_dealer_cities(soup)
+    elif method == 'tank_ul':
+        cities = get_tank_cities(soup)
     elif method == 'gaz_playwright':
         cities = get_gaz_cities(url)
     elif method == 'changan_json':
