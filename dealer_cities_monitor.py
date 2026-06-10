@@ -4,20 +4,28 @@ import re
 import time
 import smtplib
 import requests
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-EMAIL_FROM     = os.environ.get('EMAIL_FROM', '')
-EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', '')
-EMAIL_TO       = 'g.bylov@tmgauto.ru'
-EMAIL_TO_2     = 'a.vasiliev@inter-bel.ru'
+# Загрузка .env (для запуска на сервере)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # на GitHub Actions dotenv не нужен — там переменные из Secrets
 
-CITIES_FILE = 'dealer_cities.json'
-MSK = timezone(timedelta(hours=3))
+# ── Настройки ──────────────────────────────────────────────────────────────────
+EMAIL_FROM      = os.environ['EMAIL_FROM']
+EMAIL_PASSWORD  = os.environ['EMAIL_PASSWORD']
+EMAIL_TO        = 'g.bylov@tmgauto.ru'
+
+TELEGRAM_TOKEN   = os.environ.get('TELEGRAM_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+
+CITIES_FILE    = 'dealer_cities.json'
+MSK            = timezone(timedelta(hours=3))
 
 HEADERS = {
     'User-Agent': (
@@ -29,37 +37,190 @@ HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
+# ── Бренды: (название, url, метод_парсинга) ────────────────────────────────────
+# Методы:
+#   'ul_li'        — города в <li> внутри <ul>/<ol>
+#   'p_colon'      — города перечислены после двоеточия в тексте
+#   'regex'        — произвольный regex по тексту страницы
+#   'manual'       — сайт требует JS / нестандартная структура, ставим заглушку
 BRANDS = [
-    # ── Латиница (по алфавиту) ────────────────────────────────────────────────
-    {'name': 'AVATR',           'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'avatr'},
-    {'name': 'BELGEE',          'url': 'https://belgee.ru/become-dealer',                  'method': 'ul_li'},
-    {'name': 'CHANGAN',         'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'changan'},
-    {'name': 'CHANGAN UNI',     'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'uni'},
-    {'name': 'DEEPAL',          'url': 'https://changanauto.ru/about-us/become-a-dealer', 'method': 'changan_json', 'subbrand': 'deepal'},
-    {'name': 'EVOLUTE',         'url': 'https://evolute.ru/become-dealer',                 'method': 'ul_li'},
-    {'name': 'EXEED',           'url': 'https://exeed.ru/dealers/become-dealer/',          'method': 'ul_li'},
-    {'name': 'GAC',             'url': 'https://gac.ru/become-a-dealer?footer',            'method': 'gac_li'},
-    {'name': 'GEELY',           'url': 'https://www.geely-motors.com/geelyinrussia/become-a-dealer', 'method': 'ul_li'},
-    {'name': 'HAVAL',           'url': 'https://haval.ru/become_dealer/actual-dealer/',    'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
-    {'name': 'HONGQI',          'url': 'https://hongqi.ru/kak-stat-dilerom',              'method': 'hongqi_table'},
-    {'name': 'JAC',             'url': 'https://jaccar.ru/world-jac/become-a-dealer/',    'method': 'jac_strong'},
-    {'name': 'JETOUR / SOUEAST','url': 'https://jetour-ru.com/explore/dealer-join',       'method': 'ul_li'},
-    {'name': 'KGM',             'url': 'https://kgm.ru/become-dealer',                    'method': 'ul_li'},
-    {'name': 'KNEWSTAR',        'url': 'https://knewstar.ru/become-dealer',               'method': 'ul_li'},
-    {'name': 'LADA',            'url': 'https://www.lada.ru/dealers/contest',             'method': 'ul_li'},
-    {'name': 'OMODA / JAECOO', 'url': 'https://omoda.ru/omoda-dealers/become-a-dealer/', 'method': 'omoda_li'},
-    {'name': 'SOLARIS',         'url': 'https://solaris.auto/become-dealer',              'method': 'ul_li'},
-    {'name': 'SOLLERS',         'url': 'https://sollers-cargo.ru/dealer/',                'method': 'sollers_li'},
-    {'name': 'TANK',            'url': 'https://tank.ru/become-dealer',                   'method': 'regex', 'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)'},
-    {'name': 'TENET',           'url': 'https://tenet.ru/dealers/become-a-dealer/',       'method': 'ul_li'},
-    {'name': 'VOLGA',           'url': 'https://volga.auto/rasshireniye-dl',       'method': 'volga_tilda'},
-    {'name': 'VOYAH',           'url': 'https://voyah.su/voyah-space/dealerships?footer', 'method': 'voyah_li'},
-    # ── Кириллица (по алфавиту) ───────────────────────────────────────────────
-    {'name': 'ГАЗ',             'url': 'https://stt.ru/become-partners',                  'method': 'gaz_playwright'},
-    {'name': 'МОСКВИЧ',         'url': 'https://moskvich.ru/become-a-dealer',             'method': 'moskvich_li'},
-    {'name': 'УАЗ',             'url': 'https://www.uaz.ru/company/become-dealer',        'method': 'p_colon'},
+    {
+        'name':   'ГАЗ',
+        'url':    'https://stt.ru/become-partners',
+        'method': 'gaz_playwright',
+        'note':   'Вкладка Дилерский центр — 7 городов, JS-рендеринг',
+    },
+    {
+        'name':   'УАЗ',
+        'url':    'https://www.uaz.ru/company/become-dealer',
+        'method': 'p_colon',
+        'note':   '',
+    },
+    {
+        'name':   'LADA',
+        'url':    'https://www.lada.ru/dealers/contest',
+        'method': 'ul_li',
+        'note':   'Блокирует зарубежные IP — работает только с сервера в РФ',
+    },
+    {
+        'name':   'МОСКВИЧ',
+        'url':    'https://moskvich.ru/become-a-dealer',
+        'method': 'ul_li',
+        'note':   'Список городов в ul/li, доступен только с РФ IP',
+    },
+    {
+        'name':   'HAVAL',
+        'url':    'https://haval.ru/become_dealer/actual-dealer/',
+        'method': 'regex',
+        'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)',
+        'note':   '',
+    },
+    {
+        'name':   'TANK',
+        'url':    'https://tank.ru/become-dealer',
+        'method': 'regex',
+        'pattern': r'(?:Список городов[^:]*:|в городах?:?|открытие дилеров[^:]*:)\s*(.*?)(?:\.|Для подачи|$)',
+        'note':   '',
+    },
+    {
+        'name':   'GEELY',
+        'url':    'https://www.geely-motors.com/geelyinrussia/become-a-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'BELGEE',
+        'url':    'https://belgee.ru/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'KNEWSTAR',
+        'url':    'https://knewstar.ru/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'CHANGAN',
+        'url':    'https://changanauto.ru/about-us/become-a-dealer',
+        'method': 'changan_json',
+        'subbrand': 'changan',
+        'note':   '',
+    },
+    {
+        'name':   'CHANGAN UNI',
+        'url':    'https://changanauto.ru/about-us/become-a-dealer',
+        'method': 'changan_json',
+        'subbrand': 'uni',
+        'note':   '',
+    },
+    {
+        'name':   'AVATR',
+        'url':    'https://changanauto.ru/about-us/become-a-dealer',
+        'method': 'changan_json',
+        'subbrand': 'avatr',
+        'note':   '',
+    },
+    {
+        'name':   'DEEPAL',
+        'url':    'https://changanauto.ru/about-us/become-a-dealer',
+        'method': 'changan_json',
+        'subbrand': 'deepal',
+        'note':   '',
+    },
+    {
+        'name':   'GAC',
+        'url':    'https://gac.ru/become-a-dealer?footer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'JAC',
+        'url':    'https://jac.ru/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'EVOLUTE',
+        'url':    'https://evolute.ru/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'TENET',
+        'url':    'https://tenet.ru/dealers/become-a-dealer/',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'OMODA',
+        'url':    'https://omoda.ru/omoda-dealers/become-a-dealer/',
+        'method': 'omoda_li',
+        'note':   'Список городов в ul/li под заголовком "следующих городах"',
+    },
+    {
+        'name':   'JAECOO',
+        'url':    'https://jaecoo.ru/jaecoo-dealers/become-a-dealer/',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'EXEED',
+        'url':    'https://exeed.ru/dealers/become-dealer/',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'JETOUR',
+        'url':    'https://jetour-ru.com/explore/dealer-join',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'SOUEAST',
+        'url':    'https://soueast.ru/dealer-join',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'VOYAH',
+        'url':    'https://voyah.su/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'HONGQI',
+        'url':    'https://hongqi.ru/kak-stat-dilerom',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'SOLARIS',
+        'url':    'https://solaris.auto/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'KGM',
+        'url':    'https://kgm.ru/become-dealer',
+        'method': 'ul_li',
+        'note':   '',
+    },
+    {
+        'name':   'VOLGA',
+        'url':    'https://volga.auto/rasshireniye-dl',
+        'method': 'volga_tilda',
+        'note':   'Расширенная программа — все этапы включая перспективные',
+    },
+    {
+        'name':   'VOLGA_FORM',
+        'url':    'https://fecdn.tradedealer.net/tradedealer/form-constructor-frontend/7476/1215931/1216564/form-constructor-desktop/zwwl9tfiwy',
+        'method': 'volga_tradedealer',
+        'note':   'Активные слоты с датой подачи заявки (форма на stat-dilerom)',
+    },
 ]
 
+# ── Ключевые слова, по которым ищем блок с городами ───────────────────────────
 CITY_BLOCK_KEYWORDS = [
     'список городов', 'следующих городах', 'открытых город',
     'поиск партнера', 'поиск партнёра', 'прием заявок',
@@ -74,9 +235,9 @@ CITY_STOP_PHRASES = [
     'стратегии', 'размер', 'площадь', 'расположение',
 ]
 
-CITY_GARBAGE = {'России', 'в', 'и', 'г', 'ul', 'li', 'h2', '/h2', '<ul>', '</ul>', '<li>', '</li>'}
+CITY_GARBAGE = {'России', 'в', 'и', 'г'}
 
-
+# ── HTTP запрос с повтором ────────────────────────────────────────────────────
 def fetch(url, retries=2, delay=3, timeout=15):
     for attempt in range(retries):
         try:
@@ -91,55 +252,33 @@ def fetch(url, retries=2, delay=3, timeout=15):
             time.sleep(delay)
 
 
-def clean_city(text):
-    text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('\xa0', ' ').replace('&nbsp;', ' ').replace('&nbsp', ' ')
-    text = text.strip(' .:()«»"\'\n\r\t')
-    return ' '.join(text.split())
-
-
-def is_valid_city(text):
-    text = clean_city(text)
-    lower = text.lower()
-
-    if not (2 <= len(text) <= 40):
-        return False
-    if not any(c.isalpha() for c in text):
-        return False
-    if text in CITY_GARBAGE or lower in CITY_GARBAGE:
-        return False
-    if 'http' in lower or '<' in text or '>' in text:
-        return False
-    if text[0].isdigit():
-        return False
-
-    bad_words = [
-        'форма', 'заявка', 'дилер', 'сервис', 'партнер',
-        'партнёр', 'скачать', 'отправить', 'требования',
-        'заполнить', 'подать', 'контакт', 'телефон',
-    ]
-    return not any(w in lower for w in bad_words)
-
-
+# ── Общий поиск блока с городами в soup ──────────────────────────────────────
 def find_city_block(soup):
+    """
+    Ищет тег (p / div / section / li), текст которого содержит
+    одно из ключевых слов, и пытается извлечь список городов
+    из текста этого тега или следующего за ним.
+    """
     text_lower = soup.get_text(' ', strip=True).lower()
-    found_kw = next((kw for kw in CITY_BLOCK_KEYWORDS if kw in text_lower), None)
-
+    found_kw = None
+    for kw in CITY_BLOCK_KEYWORDS:
+        if kw in text_lower:
+            found_kw = kw
+            break
     if not found_kw:
         return []
 
+    # Ищем сам тег
     for tag in soup.find_all(['p', 'div', 'li', 'span', 'h2', 'h3', 'h4']):
         tag_text = tag.get_text(' ', strip=True).lower()
-
         if found_kw in tag_text:
+            # Берём весь текст этого тега + следующего соседа
             combined = tag.get_text(' ', strip=True)
             nxt = tag.find_next_sibling()
-
             if nxt:
                 combined += ' ' + nxt.get_text(' ', strip=True)
 
             cities = extract_cities_from_text(combined)
-
             if cities:
                 return cities
 
@@ -147,425 +286,317 @@ def find_city_block(soup):
 
 
 def extract_cities_from_text(text):
+    """
+    Из произвольного текста пытается вытащить список городов.
+    Ориентируется на запятые и перечисления после ключевого слова.
+    """
     lower = text.lower()
     cut = -1
-
     for kw in CITY_BLOCK_KEYWORDS:
         idx = lower.find(kw)
         if idx != -1:
             cut = idx + len(kw)
             break
-
     if cut == -1:
         return []
 
     tail = text[cut:]
-
     for sp in CITY_STOP_PHRASES:
         idx = tail.lower().find(sp)
         if idx != -1:
             tail = tail[:idx]
 
     raw_cities = re.split(r'[,;\n•·–—]+', tail)
-
     cities = []
-    seen = set()
-
     for c in raw_cities:
-        c = clean_city(c)
+        c = c.strip(' .:()«»"\'\n\r')
         c = re.sub(r'\s+в\s+\d{4}\s+г\.?$', '', c).strip()
         c = re.sub(r'^\s*:\s*', '', c).strip()
         c = re.sub(r'^России\s*', '', c).strip()
-
-        if is_valid_city(c) and c not in seen:
-            seen.add(c)
+        if (2 <= len(c) <= 40
+                and c not in CITY_GARBAGE
+                and not c[0].isdigit()
+                and 'http' not in c.lower()):
             cities.append(c)
-
     return cities
 
 
+# ── Парсер ul/li ──────────────────────────────────────────────────────────────
 def parse_ul_li(soup):
+    """
+    Ищет <ul>/<ol>, которые идут после заголовка/абзаца с ключевыми словами,
+    и берёт текст <li> как города.
+    """
+    def clean_city(text):
+        """Очищаем текст li от мусора: &nbsp, пустые строки, спецсимволы."""
+        import unicodedata
+        # Нормализуем unicode (убираем &nbsp; = \xa0 и другие пробельные)
+        text = text.replace('\xa0', ' ').replace('&nbsp', '').replace(';', '').strip()
+        text = ' '.join(text.split())  # схлопываем множественные пробелы
+        return text
+
+    def is_valid_city(text):
+        text = clean_city(text)
+        return (2 <= len(text) <= 40
+                and not text.startswith(',')
+                and any(c.isalpha() for c in text)
+                and 'http' not in text.lower())
+
+    # Приоритет 1: заголовок/абзац с ключевым словом → следующий <ul>
     for tag in soup.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'strong']):
-        if any(kw in tag.get_text(' ', strip=True).lower() for kw in CITY_BLOCK_KEYWORDS):
+        if any(kw in tag.get_text().lower() for kw in CITY_BLOCK_KEYWORDS):
             ul = tag.find_next('ul')
-
             if ul:
-                cities = []
-                seen = set()
-
-                for li in ul.find_all('li'):
-                    city = clean_city(li.get_text(' ', strip=True))
-
-                    if is_valid_city(city) and city not in seen:
-                        seen.add(city)
-                        cities.append(city)
-
+                cities = [clean_city(li.get_text(strip=True))
+                          for li in ul.find_all('li')
+                          if is_valid_city(li.get_text(strip=True))]
                 if cities:
                     return cities
 
-    return find_city_block(soup)
+    # Приоритет 2: универсальный поиск по тексту
+    cities = find_city_block(soup)
+    if cities:
+        return cities
+
+    return []
 
 
+# ── Парсер p_colon ────────────────────────────────────────────────────────────
 def parse_p_colon(soup):
     return find_city_block(soup)
 
 
+# ── Парсер regex ─────────────────────────────────────────────────────────────
 def parse_regex(text, pattern):
     m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-
     if not m:
         return []
-
-    raw = re.sub(r'<[^>]+>', ' ', m.group(1))
+    raw = m.group(1)
     cities = re.split(r'[,;\n•·–—]+', raw)
-
     result = []
-    seen = set()
-
     for c in cities:
-        c = clean_city(c)
-
-        if is_valid_city(c) and c not in seen:
-            seen.add(c)
+        c = c.strip(' .:()«»"\'')
+        if 2 <= len(c) <= 40:
             result.append(c)
-
     return result
 
 
+# ── Основная функция получения городов для одного бренда ──────────────────────
 def get_omoda_dealer_cities(soup):
+    """
+    omoda.ru/omoda-dealers/become-a-dealer/
+    Список городов в <ul><li> под фразой "в следующих городах:"
+    """
     keyword = 'следующих городах'
-
     for tag in soup.find_all(['p', 'h2', 'h3', 'div', 'span']):
-        if keyword in tag.get_text(' ', strip=True).lower():
+        if keyword in tag.get_text().lower():
             ul = tag.find_next('ul')
-
             if ul:
                 cities = []
-                seen = set()
-
                 for li in ul.find_all('li'):
-                    city = clean_city(li.get_text(' ', strip=True))
-
-                    if is_valid_city(city) and city not in seen:
-                        seen.add(city)
+                    city = li.get_text(strip=True).replace('\xa0', ' ').strip()
+                    if 2 <= len(city) <= 40 and any(c.isalpha() for c in city):
                         cities.append(city)
-
                 if cities:
                     return cities
-
-    return []
-
-
-def get_gac_dealer_cities(soup):
-    """
-    gac.ru/become-a-dealer — города спрятаны в аккордеоне td-accordion.
-    Кнопка аккордеона: <button>Список городов...</button>
-    Тело аккордеона: <div class="td-accordion__body"> с тремя колонками ul/li.
-    """
-    keyword = 'список городов'
-    # Ищем кнопку аккордеона с нужным текстом
-    for tag in soup.find_all(['button', 'h2', 'h3', 'h4', 'p', 'strong']):
-        if keyword in tag.get_text(' ', strip=True).lower():
-            cities = []
-            seen = set()
-            # Для аккордеона — тело идёт как следующий sibling div
-            parent = tag.parent  # div.td-accordion
-            body = parent.find('div', class_='td-accordion__body') if parent else None
-            if not body:
-                # Fallback: ищем все ul после тега
-                body = tag.find_next('div')
-            if body:
-                for ul in body.find_all('ul'):
-                    for li in ul.find_all('li'):
-                        city = clean_city(li.get_text())
-                        if is_valid_city(city) and city not in seen:
-                            seen.add(city)
-                            cities.append(city)
-            if cities:
-                return cities
-    return []
-
-
-def get_hongqi_cities(soup):
-    """
-    hongqi.ru/kak-stat-dilerom — таблица рендерится JS, с сервера не приходит.
-    Используем жёстко прописанный список (27 городов).
-    Обновлять вручную при изменениях.
-    """
-    # Пробуем парсить на случай если страница вдруг отдаст таблицу
-    for table in soup.find_all('table'):
-        cities = []
-        seen = set()
-        for td in table.find_all('td'):
-            city = clean_city(td.get_text())
-            if is_valid_city(city) and city not in seen:
-                seen.add(city)
-                cities.append(city)
-        if len(cities) >= 5:
-            return cities
-    # Fallback — последний известный список
-    return [
-        'Астрахань', 'Киров', 'Уфа', 'Волгоград',
-        'Минеральные Воды', 'Абакан', 'Ставрополь', 'Ижевск',
-        'Оренбург', 'Чебоксары', 'Сыктывкар', 'Липецк',
-        'Ульяновск', 'Тольятти', 'Барнаул', 'Омск',
-        'Пенза', 'Нижнекамск', 'Саранск', 'Тверь',
-        'Магнитогорск', 'Саратов', 'Стерлитамак', 'Аксай',
-        'Курск', 'Смоленск', 'Сызрань',
-    ]
-
-
-
-def get_jac_cities(soup):
-    """
-    jaccar.ru — города в <p><strong> внутри div.cg-1.mt-orange (два слайда).
-    Сайт рендерится JS — fallback с жёстким списком.
-    """
-    cities = []
-    seen = set()
-    for block in soup.find_all('div', class_=lambda c: c and 'mt-orange' in c and 'text-content' in c):
-        for strong in block.find_all('strong'):
-            city = clean_city(strong.get_text())
-            if is_valid_city(city) and city not in seen:
-                seen.add(city)
-                cities.append(city)
-    if cities:
-        return cities
-    return [
-        'Москва', 'Санкт-Петербург', 'Архангельск', 'Барнаул', 'Брянск',
-        'Вологда', 'Кемерово', 'Краснодар', 'Курск', 'Липецк',
-        'Нижний Тагил', 'Омск', 'Орел', 'Оренбург', 'Пенза',
-        'Пермь', 'Саратов', 'Сочи', 'Ставрополь', 'Стерлитамак',
-        'Тамбов', 'Томск', 'Тула', 'Ульяновск', 'Челябинск',
-        'Череповец', 'Энгельс',
-    ]
-
-
-
-def get_sollers_cities(soup):
-    """
-    sollers-cargo.ru/dealer/ — первая карточка c-cards__item (Продажи+сервис).
-    Сайт рендерится JS — fallback с жёстким списком.
-    """
-    first_card = soup.find('div', class_='c-cards__item')
-    if first_card:
-        cities = []
-        seen = set()
-        for li in first_card.find_all('li'):
-            city = clean_city(li.get_text())
-            if is_valid_city(city) and city not in seen:
-                seen.add(city)
-                cities.append(city)
-        if cities:
-            return cities
-    return [
-        'Архангельск', 'Астрахань', 'Брянск', 'Владикавказ', 'Волгоград',
-        'Воронеж', 'Грозный', 'Донецкая Народная Республика', 'Запорожская область',
-        'Киров', 'Комсомольск-на-Амуре', 'Курган', 'Курск',
-        'Луганская Народная Республика', 'Магнитогорск', 'Махачкала',
-        'Минеральные воды', 'Москва', 'Нижневартовск', 'Орел', 'Пенза',
-        'Петрозаводск', 'Самара', 'Севастополь', 'Смоленск', 'Тамбов',
-        'Ульяновск', 'Херсонская область', 'Челябинск', 'Ярославль',
-    ]
-
-
-
-def get_moskvich_cities(soup):
-    """
-    moskvich.ru/become-a-dealer — города в ul/li внутри div.dealer_tender_block2
-    """
-    block = soup.find('div', class_='dealer_tender_block2')
-    if block:
-        cities = []
-        seen = set()
-        for li in block.find_all('li'):
-            city = clean_city(li.get_text())
-            if is_valid_city(city) and city not in seen:
-                seen.add(city)
-                cities.append(city)
-        if cities:
-            return cities
-    return []
-
-
-def get_voyah_cities(soup):
-    """
-    voyah.su — города в li.td-text-fade внутри div.d-none.d-md-block.
-    Берём только десктопный блок (без дублей мобильной версии).
-    """
-    block = soup.find('div', class_=lambda c: c and 'd-none' in c and 'd-md-block' in c)
-    if block:
-        cities = []
-        seen = set()
-        for li in block.find_all('li', class_='td-text-fade'):
-            city = clean_city(li.get_text())
-            # Убираем пометки типа "(2-й дилерский центр)"
-            city = re.sub(r'\s*\(.*?\)', '', city).strip()
-            if is_valid_city(city) and city not in seen:
-                seen.add(city)
-                cities.append(city)
-        if cities:
-            return cities
     return []
 
 
 def get_gaz_cities(url):
     """
-    stt.ru/become-partners — дистрибьютор ГАЗ.
-    Вкладки Сервис/Дилерский центр разделяются JS.
-    С сервера приходит только один список (Сервис, 61 город).
-    Используем жёстко прописанный список Дилерский центр (7 городов).
-    Обновлять вручную при изменениях на сайте.
+    stt.ru/become-partners — дистрибьютор ГАЗ (СТТ).
+    Страница содержит две вкладки: Сервис (61 город) и Дилерский центр (7 городов).
+    Нам нужна только вкладка «Дилерский центр».
+    Переключение вкладок — JS, поэтому используем Playwright.
+    Если Playwright недоступен — возвращаем заранее известный список.
     """
-    return ['Астрахань', 'Душанбе', 'Курган', 'Миасс',
-            'Новый Уренгой', 'Нижневартовск', 'Сочи']
+    FALLBACK = [
+        'Астрахань', 'Душанбе', 'Курган', 'Миасс',
+        'Новый Уренгой', 'Нижневартовск', 'Сочи',
+    ]
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, wait_until='networkidle', timeout=30000)
+            # Кликаем на вкладку "Дилерский центр"
+            page.click('text=Дилерский центр')
+            page.wait_for_timeout(1500)
+            html = page.content()
+            browser.close()
 
+        soup = BeautifulSoup(html, 'lxml')
+        # После клика активная вкладка — ищем блок с городами
+        # Структура: кнопки вкладок → список городов ниже
+        # Ищем все текстовые ноды которые выглядят как города
+        # в блоке после переключения
+        cities = []
+        seen = set()
+        for tag in soup.find_all(['p', 'li', 'span', 'div', 'strong', 'b']):
+            text = tag.get_text(strip=True)
+            # Город: 2-30 символов, не число, не служебное
+            if (2 <= len(text) <= 30
+                    and not text[0].isdigit()
+                    and 'http' not in text
+                    and text not in seen
+                    and not any(w in text.lower() for w in [
+                        'сервис', 'дилерский', 'центр', 'поиск', 'городам',
+                        'всего', 'город', 'запчаст', 'спецтехник', 'партнёр',
+                        'партнер', 'заявк', 'консульт', 'интервью', 'документ',
+                        'сотрудничест', 'рентабельност', 'ассортимент',
+                        'персонал', 'совместн', 'программ',
+                    ])):
+                seen.add(text)
+                cities.append(text)
 
+        # Оставляем только реалистичные города (есть в известном списке или похожи)
+        # Дополнительная проверка: в Playwright список должен быть ~7 городов
+        if 3 <= len(cities) <= 20:
+            return cities
+        return FALLBACK
 
-def get_changan_cities_from_table(html, subbrand=None):
-    """
-    changanauto.ru теперь рендерит города в HTML-таблицах (Vue SSR).
-    Каждая таблица соответствует суббренду (changan, uni, avatr, deepal).
-    Первый <td> каждой строки — название города.
-    Таблицы идут последовательно, порядок: changan, uni, avatr, deepal.
-    """
-    soup = BeautifulSoup(html, 'html.parser')
-    tables = soup.find_all('table')
-
-    # Маппинг суббренда на индекс таблицы
-    subbrand_index = {'changan': 0, 'uni': 1, 'avatr': 2, 'deepal': 3}
-
-    if subbrand and subbrand in subbrand_index:
-        idx = subbrand_index[subbrand]
-        target_tables = [tables[idx]] if idx < len(tables) else []
-    else:
-        target_tables = tables
-
-    seen = set()
-    cities = []
-    for table in target_tables:
-        for row in table.find_all('tr')[1:]:  # пропускаем заголовок
-            tds = row.find_all('td')
-            if tds:
-                city = clean_city(tds[0].get_text())
-                if is_valid_city(city) and city not in seen:
-                    seen.add(city)
-                    cities.append(city)
-    return cities
+    except Exception as e:
+        print(f'  ГАЗ Playwright ошибка: {e}, используем fallback')
+        return FALLBACK
 
 
 def get_changan_cities(html, brand=None):
     """
-    changanauto.ru — данные в <script data-page="app" type="application/json">.
-    Структура: props.data.tables — список суббрендов.
-    Fallback: жёстко прописанные города из последнего известного состояния.
+    changanauto.ru — SPA на Inertia.js.
+    Все данные сериализованы в JSON внутри атрибута data-page у div#app.
+    Структура: props.data.tables — список суббрендов (changan, uni, avatr, deepal),
+    каждый содержит rows с полем city.
+    Возвращаем объединённый список уникальных городов по всем суббрендам.
     """
-    FALLBACK = {
-        'changan': ['Березники', 'Владивосток', 'Воронеж', 'Кемерово', 'Майкоп',
-                    'Москва', 'Нефтекамск', 'Нижний Новгород', 'Обнинск', 'Псков',
-                    'Санкт-Петербург', 'Хабаровск'],
-        'uni':     ['Березники', 'Владивосток', 'Воронеж', 'Кемерово', 'Майкоп',
-                    'Москва', 'Нефтекамск', 'Нижний Новгород', 'Обнинск', 'Псков',
-                    'Санкт-Петербург'],
-        'avatr':   ['Владимир', 'Грозный', 'Иркутск', 'Кемерово', 'Красноярск',
-                    'Минеральные Воды', 'Новороссийск', 'Омск', 'Ростов-на-Дону',
-                    'Рязань', 'Самара', 'Саратов', 'Сочи', 'Тула', 'Ярославль'],
-        'deepal':  ['Абакан', 'Белгород', 'Владимир', 'Иркутск', 'Калуга',
-                    'Красноярск', 'Курск', 'Липецк', 'Мурманск', 'Орёл',
-                    'Петрозаводск', 'Самара', 'Саратов', 'Сургут', 'Ярославль'],
-    }
-    subbrand = (brand or {}).get('subbrand')
-
+    import json as _json
+    soup = BeautifulSoup(html, 'lxml')
+    div = soup.find('div', id='app')
+    if not div:
+        return []
+    raw_attr = div.get('data-page', '')
+    if not raw_attr:
+        return []
     try:
-        from bs4 import BeautifulSoup as _BS
-        import json as _json
-
-        soup = _BS(html, 'html.parser')
-        # Данные в <script data-page="app" type="application/json">
-        script = soup.find('script', attrs={'data-page': 'app', 'type': 'application/json'})
-        if script and script.string:
-            data = _json.loads(script.string)
-            tables = data.get('props', {}).get('data', {}).get('tables', [])
-            if tables:
-                target = subbrand
-                seen = set()
-                cities = []
-                for t in tables:
-                    if target and t.get('name', '') != target:
-                        continue
-                    for row in t.get('rows', []):
-                        city = clean_city(row.get('city', ''))
-                        if is_valid_city(city) and city not in seen:
-                            seen.add(city)
-                            cities.append(city)
-                if cities:
-                    return cities
-    except Exception as e:
-        print(f'  CHANGAN: ошибка парсинга: {e}')
-
-    return FALLBACK.get(subbrand, [])
-
-
-
-def get_volga_cities_tilda(html):
-    """
-    volga.auto/rasshireniye-dl — два списка:
-    1. Текущий конкурс: molecule-блоки с датами в tn-atom
-    2. Перспективные: абзац «планирует»
-    Заголовки таблиц отфильтровываются.
-    """
-    from bs4 import BeautifulSoup as _BS
-    date_pattern = re.compile(r'\d{2}\.\d{2}\.\d{4}')
-    skip_words = ('анкет', 'дата', 'сдачи', 'заполнен')
-    cities = []
+        data = _json.loads(raw_attr)
+    except Exception:
+        return []
+    tables = data.get('props', {}).get('data', {}).get('tables', [])
+    target = (brand or {}).get('subbrand', None)
     seen = set()
-
-    soup = _BS(html, 'html.parser')
-
-    # ── Текущий конкурс ───────────────────────────────────────────────────────
-    for molecule in soup.find_all('div', id=re.compile(r'molecule-')):
-        atoms = molecule.find_all('div', class_='tn-atom')
-        texts = [a.get_text(strip=True) for a in atoms]
-        dates = [t for t in texts if date_pattern.search(t)]
-        non_dates = [t for t in texts
-                     if not date_pattern.search(t)
-                     and 2 <= len(t) <= 40
-                     and any(c.isalpha() for c in t)
-                     and not any(w in t.lower() for w in skip_words)]
-        if dates and non_dates:
-            for city in non_dates:
-                if city not in seen:
-                    seen.add(city)
-                    cities.append(f'{city} ({dates[0]})')
-
-    # ── Перспективные ─────────────────────────────────────────────────────────
-    future = []
-    seen_future = set()
-    for tag in soup.find_all(['p', 'div']):
-        text = tag.get_text(' ', strip=True)
-        if 'планирует' in text.lower() and len(text) > 50:
-            part = text.split(':', 1)[-1] if ':' in text else text
-            part = re.split(r'Возможно', part)[0]
-            for city in re.split(r'[,;]', part):
-                city = clean_city(city.strip('.').strip())
-                if is_valid_city(city) and city not in seen_future:
-                    seen_future.add(city)
-                    future.append(city)
-            break
-
-    if future:
-        cities.append('На последующих этапах: ' + ', '.join(future))
-
+    cities = []
+    for t in tables:
+        if target and t.get('name', '') != target:
+            continue
+        for row in t.get('rows', []):
+            city = row.get('city', '').strip()
+            city_clean = re.sub(r'\s*\(.*?\)', '', city).strip()
+            if city_clean and city_clean not in seen:
+                seen.add(city_clean)
+                cities.append(city_clean)
     return cities
 
 
+def get_volga_tradedealer_cities():
+    """
+    VOLGA stat-dilerom — форма через TradeDealer API.
+    Возвращает города с активными датами подачи заявок.
+    Формат choices: "Город / ДД.ММ.ГГГГ"
+    """
+    url = 'https://fecdn.tradedealer.net/tradedealer/form-constructor-frontend/7476/1215931/1216564/form-constructor-desktop/zwwl9tfiwy'
+    params = {'company_base_id': '10463'}
+    try:
+        r = requests.get(url, params=params, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        fields = data.get('form', {}).get('fields', [])
+        cities = []
+        for field in fields:
+            if field.get('type') == 'select':
+                choices = field.get('options', {}).get('choices', [])
+                for choice in choices:
+                    city = choice.split(' / ')[0].strip()
+                    if city:
+                        cities.append(city)
+        return cities
+    except Exception as e:
+        print(f'  VOLGA TradeDealer ошибка: {e}')
+        return []
+
+
+def send_telegram(text):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print('Telegram не настроен, пропускаем')
+        return
+    url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': text,
+        'parse_mode': 'HTML',
+    }
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code == 200:
+            print('Telegram отправлен успешно')
+        else:
+            print(f'Telegram ошибка: {r.status_code} {r.text}')
+    except Exception as e:
+        print(f'Telegram исключение: {e}')
+
+
+def build_telegram_message(results, changes, today_str):
+    lines = [f'<b>Города для дилерства — {today_str}</b>\n']
+
+    has_changes = any(v for v in changes.values())
+    if has_changes:
+        lines.append('🔔 <b>Изменения за неделю:</b>')
+        for brand_name, brand_changes in changes.items():
+            for ch in brand_changes:
+                lines.append(f'  {brand_name}: {ch}')
+        lines.append('')
+
+    for brand_name, cities in results.items():
+        if cities:
+            lines.append(f'<b>{brand_name}</b>: {", ".join(cities)}')
+        else:
+            lines.append(f'<b>{brand_name}</b>: —')
+
+    return '\n'.join(lines)
+
+
+    """
+    VOLGA использует Tilda — города хранятся в JSON форм прямо в HTML.
+    Ищем li_variants с датами в формате: Город // ДД.ММ.ГГГГ
+    """
+    import re as _re, json as _json
+    pattern = r'"li_variants"\s*:\s*"((?:[^"\\]|\\.)*)"'
+    matches = _re.findall(pattern, html)
+    for raw_escaped in matches:
+        try:
+            decoded = _json.loads('"' + raw_escaped + '"')
+        except Exception:
+            continue
+        if '//' in decoded:
+            cities = []
+            for line in decoded.split('\n'):
+                if '//' in line:
+                    city = line.split('//')[0].strip()
+                    if city and len(city) <= 40:
+                        cities.append(city)
+            if cities:
+                return cities
+    return []
+
 
 def get_cities(brand, html_cache=None):
-    name = brand['name']
-    url = brand['url']
+    name   = brand['name']
+    url    = brand['url']
     method = brand['method']
 
     print(f'\n[{name}] {url}')
+
+    if method == 'volga_tradedealer':
+        return get_volga_tradedealer_cities()
 
     if html_cache is not None and url in html_cache:
         r = html_cache[url]
@@ -576,29 +607,15 @@ def get_cities(brand, html_cache=None):
         except Exception as e:
             print(f'  [{name}] недоступен: {e}')
             return []
-
         if r.status_code != 200:
             print(f'  [{name}] HTTP {r.status_code}')
             return []
-
         if html_cache is not None:
             html_cache[url] = r
 
-    soup = BeautifulSoup(r.text, 'html.parser')
+    soup = BeautifulSoup(r.text, 'lxml')
 
-    if method == 'voyah_li':
-        cities = get_voyah_cities(soup)
-    elif method == 'jac_strong':
-        cities = get_jac_cities(soup)
-    elif method == 'sollers_li':
-        cities = get_sollers_cities(soup)
-    elif method == 'hongqi_table':
-        cities = get_hongqi_cities(soup)
-    elif method == 'moskvich_li':
-        cities = get_moskvich_cities(soup)
-    elif method == 'gac_li':
-        cities = get_gac_dealer_cities(soup)
-    elif method == 'omoda_li':
+    if method == 'omoda_li':
         cities = get_omoda_dealer_cities(soup)
     elif method == 'gaz_playwright':
         cities = get_gaz_cities(url)
@@ -616,6 +633,7 @@ def get_cities(brand, html_cache=None):
     else:
         cities = []
 
+    # Если ничего не нашли — пробуем универсальный fallback
     if not cities:
         cities = find_city_block(soup)
 
@@ -623,6 +641,7 @@ def get_cities(brand, html_cache=None):
     return cities
 
 
+# ── Загрузка и сохранение истории ─────────────────────────────────────────────
 def load_previous():
     try:
         with open(CITIES_FILE, 'r', encoding='utf-8') as f:
@@ -636,58 +655,8 @@ def save_cities(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def build_telegram_text(results, changes, today_str):
-    lines = []
-    lines.append(f'📊 Города для дилерства — {today_str}')
-    lines.append('')
-
-    for brand_name, cities in results.items():
-        if cities:
-            lines.append(f'• {brand_name}: {", ".join(cities)}')
-        else:
-            lines.append(f'• {brand_name}: —')
-
-    return '\n'.join(lines)
-
-
-def build_email_html(results, today_str):
-    rows = ''
-    for brand_name, cities in results.items():
-        if cities:
-            cities_str = ', '.join(cities)
-        else:
-            cities_str = '<span style="color:#999;font-style:italic">—</span>'
-        rows += f"""<tr>
-            <td style="padding:8px 16px;border-bottom:1px solid #eee;
-                font-weight:bold;color:#c00;vertical-align:top;white-space:nowrap">
-                {brand_name}</td>
-            <td style="padding:8px 16px;border-bottom:1px solid #eee">
-                {cities_str}</td>
-        </tr>"""
-    return f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:800px;margin:0 auto">
-    <h2 style="background:#222;color:white;padding:16px;margin:0">
-        Города для поиска дилеров
-    </h2>
-    <p style="padding:10px 16px;background:#f9f9f9;margin:0;font-size:12px;color:#666">
-        Данные на {today_str} · Источник: официальные сайты производителей
-    </p>
-    <table style="width:100%;border-collapse:collapse">
-        <tr style="background:#f0f0f0">
-            <th style="padding:8px 16px;text-align:left;width:160px">Бренд</th>
-            <th style="padding:8px 16px;text-align:left">Открытые города</th>
-        </tr>
-        {rows}
-    </table>
-    <p style="padding:12px 16px;font-size:11px;color:#999">
-        Автоматический мониторинг · TMG Auto · Обновлено {today_str}
-    </p>
-    </body></html>"""
-
-
+# ── Email ─────────────────────────────────────────────────────────────────────
 def send_email(subject, body_html):
-    if not EMAIL_FROM or not EMAIL_PASSWORD:
-        print('Email не отправлен: EMAIL_FROM или EMAIL_PASSWORD не заданы')
-        return
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From']    = EMAIL_FROM
@@ -696,89 +665,121 @@ def send_email(subject, body_html):
     try:
         with smtplib.SMTP_SSL('smtp.mail.ru', 465) as server:
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
-            server.sendmail(EMAIL_FROM, [EMAIL_TO, EMAIL_TO_2], msg.as_string())
+            server.sendmail(EMAIL_FROM, [EMAIL_TO], msg.as_string())
         print('Письмо отправлено успешно')
     except Exception as e:
         print(f'Ошибка отправки письма: {e}')
 
 
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print('Telegram не отправлен: TELEGRAM_TOKEN или TELEGRAM_CHAT_ID не заданы')
-        return False
+def build_email_html(results, changes, today_str):
+    # ── Блок изменений ────────────────────────────────────────────────────────
+    changes_html = ''
+    has_changes = any(v for v in changes.values())
+    if has_changes:
+        change_rows = ''
+        for brand_name, brand_changes in changes.items():
+            for change in brand_changes:
+                clean = re.sub(r'<[^>]+>', '', change)
+                color = '#c00' if '❌' in change else '#007700'
+                change_rows += (
+                    f'<tr>'
+                    f'<td style="padding:6px 16px;border-bottom:1px solid #eee;'
+                    f'font-weight:bold;color:#c00">{brand_name}</td>'
+                    f'<td style="padding:6px 16px;border-bottom:1px solid #eee;'
+                    f'color:{color}">{clean}</td>'
+                    f'</tr>'
+                )
+        changes_html = f'''
+        <h3 style="background:#c00;color:white;padding:10px 16px;margin:0 0 0 0">
+            🔔 Изменения за неделю
+        </h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+            {change_rows}
+        </table>'''
 
-    url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
-    parts = [message[i:i + 3500] for i in range(0, len(message), 3500)]
+    # ── Основная таблица ──────────────────────────────────────────────────────
+    rows = ''
+    for brand_name, cities in results.items():
+        if cities:
+            cities_str = ', '.join(cities)
+        else:
+            cities_str = '<span style="color:#999;font-style:italic">не найдено / нет открытых позиций</span>'
 
-    ok = True
+        rows += (
+            f'<tr>'
+            f'<td style="padding:8px 16px;border-bottom:1px solid #eee;'
+            f'font-weight:bold;color:#c00;vertical-align:top;white-space:nowrap">'
+            f'{brand_name}</td>'
+            f'<td style="padding:8px 16px;border-bottom:1px solid #eee">'
+            f'{cities_str}</td>'
+            f'</tr>'
+        )
 
-    for idx, part in enumerate(parts, start=1):
-        try:
-            response = requests.post(
-                url,
-                json={
-                    'chat_id': TELEGRAM_CHAT_ID,
-                    'text': part,
-                    'disable_web_page_preview': True,
-                },
-                timeout=20,
-            )
-
-            if response.status_code != 200:
-                ok = False
-                print(f'Telegram ошибка HTTP {response.status_code}: {response.text}')
-            else:
-                print(f'Telegram сообщение {idx}/{len(parts)} отправлено')
-
-        except Exception as e:
-            ok = False
-            print(f'Telegram ошибка: {e}')
-
-        time.sleep(1)
-
-    return ok
+    html = f'''
+    <html><body style="font-family:Arial,sans-serif;color:#333;max-width:750px;margin:0 auto">
+    <h2 style="background:#222;color:white;padding:16px;margin:0">
+        Города, открытые для поиска дилеров
+    </h2>
+    <p style="padding:10px 16px;background:#f9f9f9;margin:0;font-size:12px;color:#666">
+        Данные на {today_str} · Источник: официальные сайты производителей
+    </p>
+    {changes_html}
+    <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#f0f0f0">
+            <th style="padding:8px 16px;text-align:left;width:130px">Бренд</th>
+            <th style="padding:8px 16px;text-align:left">Открытые города</th>
+        </tr>
+        {rows}
+    </table>
+    <p style="padding:12px 16px;font-size:11px;color:#999">
+        Автоматический мониторинг · TMG Auto · Обновлено {today_str}
+    </p>
+    </body></html>
+    '''
+    return html
 
 
+# ── Главный блок ──────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print('=== Запуск мониторинга городов для дилерства ===')
-
-    today = datetime.now(MSK).strftime('%d.%m.%Y')
+    now     = datetime.now(MSK)
+    today   = now.strftime('%d.%m.%Y')
+    is_monday = (now.weekday() == 0)  # 0 = понедельник
 
     old_data = load_previous()
     new_data = {}
-    changes = {}
-    html_cache = {}
+    changes  = {}
+
+    _html_cache = {}
 
     for brand in BRANDS:
-        name = brand['name']
-        cities = get_cities(brand, html_cache)
-
+        name   = brand['name']
+        cities = get_cities(brand, _html_cache)
         new_data[name] = cities
 
+        # Вычисляем изменения
         old_cities = set(old_data.get(name, []))
         new_cities = set(cities)
-
         brand_changes = []
-
-        for c in sorted(new_cities - old_cities):
+        for c in new_cities - old_cities:
             brand_changes.append(f'🆕 Добавлен: {c}')
-
-        for c in sorted(old_cities - new_cities):
+        for c in old_cities - new_cities:
             brand_changes.append(f'❌ Убран: {c}')
-
         changes[name] = brand_changes
 
-        time.sleep(1)
+        time.sleep(1)  # вежливая пауза между запросами
 
     save_cities(new_data)
     print(f'\nДанные сохранены в {CITIES_FILE}')
 
-    print('Отправляем в Telegram...')
-    telegram_text = build_telegram_text(new_data, changes, today)
-    send_telegram(telegram_text)
+    if is_monday:
+        print('Понедельник — отправляем письмо и Telegram...')
+        html = build_email_html(new_data, changes, today)
+        send_email(f'Города для дилерства — {today}', html)
 
-    print('Отправляем письмо...')
-    html = build_email_html(new_data, today)
-    send_email(f'Города для дилерства — {today}', html)
+        tg_text = build_telegram_message(new_data, changes, today)
+        send_telegram(tg_text)
+    else:
+        print(f'Сегодня {now.strftime("%A")} — отправка только по понедельникам, пропускаем.')
 
     print('\n=== Готово ===')
